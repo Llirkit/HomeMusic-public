@@ -51,7 +51,7 @@ function statusLine(imp: ImportOut): string {
 }
 
 function sourceTitle(imp: ImportOut): string {
-  const name = imp.source === 'text' ? 'Текстовый список' : imp.source === 'spotify' ? 'Spotify' : 'Яндекс Музыка';
+  const name = imp.source === 'text' ? 'Список из файла' : imp.source === 'spotify' ? 'Spotify' : 'Яндекс Музыка';
   return `${name}${imp.account ? ` · ${imp.account}` : ''}`;
 }
 
@@ -116,17 +116,17 @@ export function ImportsPage() {
         </ul>
       ) : null}
 
-      <SectionTitle>Из текстового файла</SectionTitle>
+      <SectionTitle>Из файла TXT или CSV</SectionTitle>
       <div className="card mx-4 space-y-3 p-4">
-        <p className="text-sm text-muted">Список из Яндекс Музыки, Spotify или другого сервиса: одна песня на строку.</p>
-        <p id="text-import-help" className="text-xs text-dim">Файл TXT до 1 МБ, до 10 000 строк. Формат: Исполнитель — Название. Можно только названия; неоднозначные совпадения останутся для ручной проверки. Повторы убираются, порядок сохраняется.</p>
-        <input ref={textFile} type="file" accept=".txt,text/plain" aria-label="Текстовый список песен" aria-describedby="text-import-help" hidden onChange={(event) => {
+        <p className="text-sm text-muted">Список из Яндекс Музыки, Spotify или другого сервиса, включая CSV из внешнего экспорта.</p>
+        <p id="text-import-help" className="text-xs text-dim">До 1 МБ и 10 000 песен. TXT: Исполнитель — Название, либо только название. CSV: колонки Track Name и Artist Name(s), как в Liked_Songs.csv. Повторы убираются, порядок сохраняется. Неоднозначные совпадения останутся для ручной проверки.</p>
+        <input ref={textFile} type="file" accept=".txt,.csv,text/plain,text/csv" aria-label="Список песен TXT или CSV" aria-describedby="text-import-help" hidden onChange={(event) => {
           const file = event.currentTarget.files?.[0];
           event.currentTarget.value = '';
           void uploadText(file);
         }} />
         <Button variant="primary" block icon="upload" busy={busy === 'text'} disabled={!!busy}
-          onClick={() => textFile.current?.click()}>Загрузить список TXT</Button>
+          onClick={() => textFile.current?.click()}>Загрузить TXT или CSV</Button>
         <p className="text-xs text-dim">Сначала покажем список для подтверждения. Имя файла станет названием плейлиста.</p>
       </div>
 

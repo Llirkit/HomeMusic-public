@@ -10,7 +10,7 @@ from app.api.schemas import ImportIn, ImportItemsOut, ImportOut, ImportPickOut, 
 from app.auth import current_user
 from app.db import get_session
 from app.imports import apply, core
-from app.imports.sources import spotify, text
+from app.imports.sources import spotify, text, track_csv
 from app.imports.sources.base import SourceError
 from app.jobs.queue import PRIORITY_IMPORT, PermanentError, enqueue, notify
 from app.models import DownloadItem, Import, ImportCollection, ImportItem, Track, User
@@ -74,15 +74,16 @@ async def import_text(request: Request, user: User = Depends(current_user),
                       filename: str = Query("Импорт.txt", max_length=255),
                       s: AsyncSession = Depends(get_session, scope="function")):
     # Raw file bytes avoid spooling an unbounded multipart upload before its size check.
-    if not filename.lower().endswith(".txt"):
-        raise HTTPException(400, "Нужен файл TXT: одна песня на строку")
+    if not filename.lower().endswith((".txt", ".csv")):
+        raise HTTPException(400, "Нужен файл TXT или CSV со списком песен")
     data = bytearray()
     async for chunk in request.stream():
         if len(data) + len(chunk) > text.MAX_BYTES:
             raise HTTPException(413, "Текстовый файл превышает 1 МБ")
         data.extend(chunk)
     try:
-        snapshot = text.parse(bytes(data), filename)
+        parser = track_csv if filename.lower().endswith(".csv") else text
+        snapshot = parser.parse(bytes(data), filename)
     except SourceError as e:
         raise HTTPException(400, str(e)) from e
     imp = Import(user_id=user.id, source="text", method="file", status="preview")

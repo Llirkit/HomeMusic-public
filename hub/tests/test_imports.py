@@ -284,6 +284,34 @@ async def test_text_title_only_does_not_guess_ambiguous_recordings(env, monkeypa
         assert (await resolve_track(s, "text", "one", {"title": song.title})).match == "not_found"
 
 
+async def test_csv_preview_and_confirmation_use_the_existing_file_flow(env):
+    from app.db import session_scope
+    from app.models import SourceMap
+
+    c = env["client"]
+    data = ('Track URI,Track Name,Album Name,Artist Name(s),Duration (ms)\n'
+            'spotify:track:1,Осень,,ДДТ,260000\n'
+            'spotify:track:2,Город золотой,,Аквариум,190000\n'
+            'spotify:track:3,Осень,,ДДТ,260000\n').encode("utf-8-sig")
+    r = await c.post("/api/imports/text", params={"filename": "Liked_Songs.CSV"}, content=data)
+    assert r.status_code == 200, r.text
+    imp = r.json()
+    assert imp["source"] == "text" and imp["status"] == "preview"
+    assert imp["stats"]["tracks"] == 2 and imp["collections"][0]["title"] == "Liked_Songs"
+    assert not await jobs("import_resolve")
+    r = await c.post(f"/api/imports/{imp['id']}/start", json={
+        "mode": "economy", "collection_ids": [imp["collections"][0]["id"]]})
+    assert r.status_code == 200, r.text
+    await run_imports()
+    assert any(p["name"] == "Liked_Songs" and p["songs"] == ["ndB", "ndA"] for p in env["state"]["playlists"].values())
+    async with session_scope() as s:
+        assert not list((await s.execute(select(SourceMap).where(SourceMap.source == "text"))).scalars())
+    r = await c.post("/api/imports/text", params={"filename": "broken.csv"}, content=b"Track Name,Artist Name(s)\n,Artist")
+    assert r.status_code == 400
+    await c.post("/api/auth/logout")
+    assert (await c.post("/api/imports/text", params={"filename": "Liked_Songs.csv"}, content=data)).status_code == 401
+
+
 async def test_text_upload_validation_and_auth(env):
     c = env["client"]
     for data, name, status in [(b"", "empty.txt", 400), (b"x" * (1024 * 1024 + 1), "large.txt", 413),

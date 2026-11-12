@@ -16,7 +16,7 @@ _PREFIX = re.compile(r"^\s*(?:\d+[.)]\s+|[-*•]\s+)")
 _SEPARATOR = re.compile(r"\s+[-–—]\s+|\t+")
 
 
-def parse(data: bytes, filename: str = "") -> Snapshot:
+def decode(data: bytes) -> str:
     if len(data) > MAX_BYTES:
         raise SourceError("Текстовый файл превышает 1 МБ")
     try:
@@ -31,6 +31,22 @@ def parse(data: bytes, filename: str = "") -> Snapshot:
         raise SourceError("Не удалось прочитать текст. Сохраните файл в UTF-8") from e
     if any(ord(c) < 32 and c not in "\t\n\r" for c in text):
         raise SourceError("Нужен текстовый файл TXT со списком песен")
+    return text
+
+
+def track_item(artist: str, title: str, **metadata) -> SnapItem:
+    key = unicodedata.normalize("NFKC", f"{artist}\0{title}").casefold()
+    ident = hashlib.sha256(key.encode()).hexdigest()
+    return SnapItem(ident, {"artist": artist, "title": title, **metadata})
+
+
+def playlist(items: list[SnapItem], filename: str) -> Snapshot:
+    title = PurePosixPath(filename.replace("\\", "/")).stem.strip()[:120] or "Импорт из текста"
+    return Snapshot(account=None, collections=[SnapCollection("playlist", "text", title, items)])
+
+
+def parse(data: bytes, filename: str = "") -> Snapshot:
+    text = decode(data)
 
     items: dict[str, SnapItem] = {}
     count = 0
@@ -50,10 +66,8 @@ def parse(data: bytes, filename: str = "") -> Snapshot:
             raise SourceError(f"Строка {number}: укажите название песни или «Исполнитель — Название»")
         if re.match(r"^(?:https?://|spotify:)", line, re.I):
             raise SourceError(f"Строка {number}: нужны названия песен, а не ссылки")
-        key = unicodedata.normalize("NFKC", f"{artist}\0{title}").casefold()
-        ident = hashlib.sha256(key.encode()).hexdigest()
-        items.setdefault(ident, SnapItem(ident, {"artist": artist, "title": title}))
+        item = track_item(artist, title)
+        items.setdefault(item.external_id, item)
     if not items:
         raise SourceError("В файле нет песен. Добавьте по одной песне на строку")
-    title = PurePosixPath(filename.replace("\\", "/")).stem.strip()[:120] or "Импорт из текста"
-    return Snapshot(account=None, collections=[SnapCollection("playlist", "text", title, list(items.values()))])
+    return playlist(list(items.values()), filename)

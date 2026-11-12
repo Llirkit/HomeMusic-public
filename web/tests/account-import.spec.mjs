@@ -154,7 +154,7 @@ test('a delayed history load and an old deep link cannot expose another account'
   expect(state.me.username).toBe('bob');
 });
 
-test('TXT upload shows preview, requires confirmation, handles errors and preserves other import options', async ({ page }) => {
+for (const format of ['TXT', 'CSV']) test(`${format} upload shows preview, requires confirmation, handles errors and preserves other import options`, async ({ page }) => {
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   const state = await backend(page);
@@ -163,16 +163,17 @@ test('TXT upload shows preview, requires confirmation, handles errors and preser
   await expect(page.getByRole('button', { name: 'Войти через Яндекс' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Загрузить экспорт Spotify' })).toBeAttached();
   await page.screenshot({ path: test.info().outputPath('text-import.png'), fullPage: true });
-  await page.getByLabel('Текстовый список песен', { exact: true }).setInputFiles({ name: 'big.txt', mimeType: 'text/plain', buffer: Buffer.alloc(1024 * 1024 + 1) });
+  await page.getByLabel('Список песен TXT или CSV', { exact: true }).setInputFiles({ name: 'big.txt', mimeType: 'text/plain', buffer: Buffer.alloc(1024 * 1024 + 1) });
   await expect(page.getByText('Текстовый файл превышает 1 МБ', { exact: true })).toBeVisible();
   expect(state.lastUpload).toBeNull();
-  await page.getByLabel('Текстовый список песен', { exact: true }).setInputFiles({ name: 'Дорога.txt', mimeType: 'text/plain', buffer: Buffer.from('bad') });
+  await page.getByLabel('Список песен TXT или CSV', { exact: true }).setInputFiles({ name: 'Дорога.txt', mimeType: 'text/plain', buffer: Buffer.from('bad') });
   await expect(page.getByText('В файле нет песен', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Загрузить список TXT' })).toBeEnabled();
-  const body = 'Кино — Группа крови\nДДТ — Осень';
-  await page.getByLabel('Текстовый список песен', { exact: true }).setInputFiles({ name: 'Дорога.txt', mimeType: 'text/plain', buffer: Buffer.from(body) });
+  await expect(page.getByRole('button', { name: 'Загрузить TXT или CSV' })).toBeEnabled();
+  const body = format === 'CSV' ? 'Track Name,Artist Name(s),Album Name,Duration (ms)\nГруппа крови,Кино,Группа крови,246000\nОсень,ДДТ,,260000' : 'Кино — Группа крови\nДДТ — Осень';
+  const filename = `Дорога.${format.toLowerCase()}`;
+  await page.getByLabel('Список песен TXT или CSV', { exact: true }).setInputFiles({ name: filename, mimeType: format === 'CSV' ? 'text/csv' : 'text/plain', buffer: Buffer.from(body) });
   await expect(page.getByText('Дорога', { exact: true })).toBeVisible();
-  expect(state.lastUpload).toEqual({ filename: 'Дорога.txt', body });
+  expect(state.lastUpload).toEqual({ filename, body });
   expect(state.start).toBeUndefined();
   await expect(page.getByText('Запомнить вход, чтобы потом подтянуть новое')).toHaveCount(0);
   const confirm = page.getByRole('button', { name: 'Перенести', exact: true });
