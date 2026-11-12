@@ -210,7 +210,7 @@ async def _sleep(seconds: float) -> None:  # replaced in tests
 
 
 def _log_switch(old: str, new: str) -> None:
-    if old != new:
+    if urlsplit(old).hostname != urlsplit(new).hostname:
         log.info("youtube media server %s doesn't answer, using %s", urlsplit(old).hostname, urlsplit(new).hostname)
 
 
@@ -500,8 +500,10 @@ class YtdlpProvider:
         if self._youtube:
             opts.update({
                 "extractor_args": {"youtube": {"player_client": ["mweb"]}},
-                "retries": 1,
-                "fragment_retries": 1,
+                "retries": 2,
+                "fragment_retries": 2,
+                "retry_sleep_functions": {"http": lambda n: min(2 ** n, 8),
+                                          "fragment": lambda n: min(2 ** n, 8)},
                 "extractor_retries": 1,
                 "concurrent_fragment_downloads": 1,
                 "sleep_interval_requests": self.cfg.sleep_requests_s,
@@ -790,12 +792,19 @@ class YtdlpProvider:
                         break
                     except DownloadError as e:
                         text = str(e).lower()
-                        transient = any(s in text for s in ("timed out", "timeout", "connection reset", "remote end closed"))
+                        transient = any(s in text for s in (
+                            "timed out", "timeout", "connection reset", "remote end closed",
+                            "http error 500", "http error 502", "http error 503", "http error 504",
+                        ))
                         if attempt or not transient or cancelled.is_set():
                             raise
                         avoid_hosts.update(h for h in re.findall(r"host=['\"]([^'\"]+)", str(e))
                                            if h.endswith(MEDIA_HOST_SUFFIX))
-                        log.info("%s: transport failed, refreshing media metadata once", self.name)
+                        if "http error 5" in text:
+                            avoid_hosts.update(urlsplit(f.get("url") or "").hostname
+                                               for f in info.get("formats") or []
+                                               if (urlsplit(f.get("url") or "").hostname or "").endswith(MEDIA_HOST_SUFFIX))
+                        log.info("%s: transient download failure, refreshing media metadata once", self.name)
             for rd in (info or {}).get("requested_downloads") or []:
                 if (fp := rd.get("filepath")) and Path(fp).is_file():
                     return Path(fp)

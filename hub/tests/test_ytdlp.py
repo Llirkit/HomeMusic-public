@@ -582,7 +582,11 @@ def test_mirror_that_only_answers_tls_is_rejected(monkeypatch) -> None:
     assert urlsplit(ytdlp_mod.answering_url(GV.replace("fvip=1", "fvip=4"))).hostname == "rr4---sn-far2.googlevideo.com"
 
 
-@pytest.mark.parametrize("message,retry", [("Read timed out", True), ("HTTP Error 403", False)])
+@pytest.mark.parametrize("message,retry", [
+    ("Read timed out", True), ("HTTP Error 503: Service Unavailable", True),
+    ("HTTP Error 502: Bad Gateway", True), ("HTTP Error 504", True),
+    ("HTTP Error 403", False), ("HTTP Error 404", False), ("HTTP Error 429", False),
+])
 async def test_fetch_refreshes_metadata_once_only_for_transport_failures(monkeypatch, tmp_path, message, retry) -> None:
     attempts = []
 
@@ -605,6 +609,51 @@ async def test_fetch_refreshes_metadata_once_only_for_transport_failures(monkeyp
             await p.fetch(c, tmp_path)
         assert len(attempts) == 1
     await p.aclose()
+
+
+async def test_repeated_503_stops_after_one_metadata_refresh(monkeypatch, tmp_path) -> None:
+    attempts = []
+
+    class UnavailableYDL(FakeYDL):
+        def process_ie_result(self, info, download=False):
+            attempts.append(info)
+            raise DownloadError("HTTP Error 503: Service Unavailable")
+
+    monkeypatch.setattr(ytdlp_mod.yt_dlp, "YoutubeDL", UnavailableYDL)
+    monkeypatch.setattr(FakeYDL, "formats", [])
+    p = YtdlpProvider(YtdlpCfg())
+    with pytest.raises(ProviderError, match="503"):
+        await p.fetch(entry_to_candidate(FLAT_TOPIC), tmp_path)
+    assert len(attempts) == 2
+    await p.aclose()
+
+
+async def test_503_refresh_avoids_failed_media_host(monkeypatch, tmp_path) -> None:
+    attempts = []
+
+    class FlakyYDL(FakeYDL):
+        def process_ie_result(self, info, download=False):
+            attempts.append(info)
+            if len(attempts) == 1:
+                raise DownloadError("HTTP Error 503: Service Unavailable")
+            return super().process_ie_result(info, download)
+
+    monkeypatch.setattr(ytdlp_mod.yt_dlp, "YoutubeDL", FlakyYDL)
+    monkeypatch.setattr(FakeYDL, "formats", [{"format_id": "251", "url": GV}])
+    media_servers(monkeypatch, "rr7---sn-isp1.googlevideo.com", "rr1---sn-far2.googlevideo.com")
+    p = YtdlpProvider(YtdlpCfg())
+    assert (await p.fetch(entry_to_candidate(FLAT_TOPIC), tmp_path)).is_file()
+    assert attempts[0]["formats"][0]["url"] == GV
+    assert attempts[1]["formats"][0]["url"] == GV.replace("rr7---sn-isp1", "rr1---sn-far2")
+    await p.aclose()
+
+
+def test_media_switch_log_only_reports_changed_hosts(caplog) -> None:
+    with caplog.at_level("INFO", logger=ytdlp_mod.__name__):
+        ytdlp_mod._log_switch("https://rr1.googlevideo.com/", "https://rr1.googlevideo.com/audio?sig=secret")
+        ytdlp_mod._log_switch("https://rr1.googlevideo.com/", "https://rr2.googlevideo.com/audio?sig=secret")
+    assert len(caplog.records) == 1
+    assert "rr2.googlevideo.com" in caplog.text and "secret" not in caplog.text
 
 
 @pytest.mark.parametrize(("answering", "expected"), [
