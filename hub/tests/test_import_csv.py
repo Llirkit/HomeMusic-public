@@ -28,6 +28,29 @@ def test_csv_semicolon_separator_multiline_titles_and_empty_rows():
     assert snap.collections[0].items[0].raw["title"] == "First\nsecond"
 
 
+def test_exporter_backslash_quotes_in_unused_and_used_fields_preserve_other_backslashes():
+    data = (r'Track Name,Artist Name(s),Album Name,Record Label' + '\n'
+            + r'"Normal ""quotes"" and \ path",Artist,Album,Label' + '\n'
+            + r'"Name \"quoted\" and \ path",Artist,"Album \"quoted\"","\"label\" Llc"' + '\n'
+            + r'After,Artist,Album,Label' + '\n')
+    items = track_csv.parse(data.encode()).collections[0].items
+    assert [i.raw["title"] for i in items] == [r'Normal "quotes" and \ path', r'Name "quoted" and \ path', 'After']
+    assert items[1].raw["album"] == 'Album "quoted"'
+
+
+def test_backslash_quote_compatibility_handles_multiline_fields_and_repeated_bad_records():
+    data = ('Track Name,Artist Name(s),Record Label\n"First\nsecond",Artist,'
+            + r'"\"label\" Llc"' + '\n' + r'"Next \"quoted\"",Artist,Label' + '\n')
+    items = track_csv.parse(data.encode()).collections[0].items
+    assert [i.raw["title"] for i in items] == ['First\nsecond', 'Next "quoted"']
+
+
+def test_irrecoverable_csv_reports_its_line_without_importing_a_partial_list():
+    data = 'Track Name,Artist Name(s)\nGood,Artist\n"Unclosed,Artist'
+    with pytest.raises(SourceError, match="Строка 3"):
+        track_csv.parse(data.encode())
+
+
 @pytest.mark.parametrize("data", [
     "", "Track Name,Artist Name(s)\n", "Name,Artist\nSong,Artist\n",
     "Track Name,Artist Name(s),Track Name\nSong,Artist,Song\n",

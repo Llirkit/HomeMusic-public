@@ -322,6 +322,16 @@ async def test_text_upload_validation_and_auth(env):
     assert (await c.post("/api/imports/text", content=b"Artist - Song")).status_code == 401
 
 
+async def test_csv_json_escaped_label_does_not_reject_the_whole_export(env):
+    data = ('Track Name,Artist Name(s),Record Label\n'
+            + r'Song,Artist,"\"label\" Llc"' + '\n').encode()
+    response = await env["client"].post("/api/imports/text", params={"filename": "Liked.csv"}, content=data)
+    assert response.status_code == 200, response.text
+    assert response.json()["stats"]["tracks"] == 1
+    assert response.json()["status"] == "preview"
+    assert not await jobs("import_resolve")
+
+
 async def test_preview_counts_what_the_library_has(env):
     c = env["client"]
     imp = await prepared(c)
