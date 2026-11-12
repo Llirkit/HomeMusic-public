@@ -334,6 +334,14 @@ async def handle_download_item(job: Job) -> None:
             if ok:
                 return
         else:
+            # Soulseek first: it has lossless files the regular sources lack (`soulseek.format`, FLAC by default)
+            if meta and (cands := await soulseek_candidates(pq, item_id)):
+                all_cands.extend(cands)
+                tries = [c for c in cands if not guard or trusted_original(c, mcfg)][:MAX_TRIES_PER_PROVIDER]
+                if tries:
+                    ok, last_reason = await try_candidates(item_id, user_id, q, meta, tries, stage, force)
+                    if ok:
+                        return
             from app.listen import listened_candidate
 
             # the file the user has just listened to (GET /api/listen) goes first: they get what they heard
@@ -392,6 +400,21 @@ async def handle_download_item(job: Job) -> None:
                           error="Нет записи в каталоге — " + ("подтвердите файл" if sure else "выберите файл"))
     else:
         await update_item(item_id, status="needs_review", error=f"Ни один кандидат не подошёл ({last_reason})")
+
+
+async def soulseek_candidates(q: TrackQuery, item_id: int) -> list[Candidate]:
+    """Soulseek files of the track when that source is on and logged in; otherwise none, and the download goes on
+    with the regular sources at once (Soulseek is never waited for)."""
+    p = svc.providers.get("soulseek")
+    if p is None:
+        return []
+    if (state := await p.health()) != "ready":
+        log.info("download %s: soulseek skipped (%s)", item_id, state)
+        return []
+    cands, err = await search_provider(p, q, item_id)
+    if err:
+        log.info("download %s: %s", item_id, err)
+    return cands
 
 
 async def search_provider(p, q: TrackQuery, item_id: int, *, limit: int = 15,

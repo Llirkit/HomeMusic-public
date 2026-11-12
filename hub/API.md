@@ -110,7 +110,7 @@ The old unscoped `hm.recentSearches` localStorage key is not imported into an ac
 |---|---|---|
 | GET | `/api/search?q=` | `SearchOut`: library tracks + Deezer (fallback hitmoz) artists/albums (12 each) and the first 25 tracks with ownership; `tracks_next` — offset of the next page of tracks, `null` if there is none (the hitmoz fallback has no pages) |
 | GET | `/api/search/tracks?q=&offset=&limit=25` | `SearchTracksOut` `{tracks, next_offset}` — further tracks of the same search from `offset` (`tracks_next`, then `next_offset`; `null` — the end). Offsets count Deezer's results, so a page may hold fewer tracks than `limit` (repeats are dropped) and may repeat a track of an earlier page: the client drops those by `ref`. `502` if Deezer fails |
-| GET | `/api/search/providers?q=&provider=&group=` | `ProviderSearchOut`: raw downloadable files from hitmoz / hitmos_fm / ytdlp and re-uploads by small channels: `yt_reupload` (plain YouTube without official copies) and `soundcloud` (for a Russian track both are regular sources of downloads and listening, ahead of YouTube Music). `provider` — one source; `group=sources` — only the regular ones, `group=reuploads` — only re-uploads (slower: SoundCloud takes seconds, so the PWA asks for the two groups separately); no `group` — all. A re-upload has `extra.reupload=true`, `extra.channel`, `extra.original_title` (its own title; `artist`/`title` are parsed from it, either order of "Artist - Title"), `extra.uncensored` — the uploader's word: `true` for "(без цензуры)"/"(правильная версия)", `false` for "(без мата)"/clean, absent otherwise. The Hub remembers every file it returns (30 days): it can be listened to (`/api/listen*`) and downloaded (`track_refs`) by its ref `file:<provider>:<provider_id>` |
+| GET | `/api/search/providers?q=&provider=&group=` | `ProviderSearchOut`: raw downloadable files from hitmoz / hitmos_fm / ytdlp and re-uploads by small channels: `yt_reupload` (plain YouTube without official copies) and `soundcloud` (for a Russian track both are regular sources of downloads and listening, ahead of YouTube Music). `provider` — one source; `group=sources` — only the regular ones, `group=reuploads` — only re-uploads (slower: SoundCloud takes seconds, so the PWA asks for the two groups separately); no `group` — all but Soulseek (`provider=soulseek` only by name: seconds per search). A re-upload has `extra.reupload=true`, `extra.channel`, `extra.original_title` (its own title; `artist`/`title` are parsed from it, either order of "Artist - Title"), `extra.uncensored` — the uploader's word: `true` for "(без цензуры)"/"(правильная версия)", `false` for "(без мата)"/clean, absent otherwise. The Hub remembers every file it returns (30 days): it can be listened to (`/api/listen*`) and downloaded (`track_refs`) by its ref `file:<provider>:<provider_id>` |
 | GET | `/api/catalog/artist/{ref}` | `ArtistPageOut` — `ref` like `dz:4505880` or `hm:123`; albums/singles/compilations sorted newest first |
 | GET | `/api/catalog/album/{ref}` | `AlbumOut` with `tracks: TrackOut[]` (`owned`, `nd_song_id`, `downloading`, `star_pending`) |
 
@@ -129,6 +129,12 @@ is under way: show the ♥ filled.
 
 | POST | `/api/downloads/items/{id}/cancel` | → `DownloadItemOut` |
 | POST | `/api/downloads/clear` | removes finished (`done`/`cancelled`) items from the list → `{removed}`. Items still needed as playlist order anchors are kept until earlier pending additions are resolved |
+
+With Soulseek on (README, «Soulseek»: off unless `SLSKD_API_KEY`, `SLSKD_SLSK_USERNAME`, `SLSKD_SLSK_PASSWORD` are set),
+a download with a catalog record tries `provider=soulseek` first: only files of `soulseek.format` (FLAC by default),
+checked against the remote file name and folders; nothing found, Soulseek offline or the transfer timing out —
+the regular source order follows at once. Listening never uses it. Its candidates carry `extra.peer`,
+`extra.filename`, `extra.format`, `extra.bit_depth`, `extra.sample_rate_hz`.
 
 For a single catalog-track heart, a client that sees `catalog_favorite_download_v1` in `/healthz` can send
 `star=true`, one `track_refs` entry, `favorite_event_id`, `favorite_ts`, `favorite_client`, and
@@ -481,6 +487,7 @@ Row statuses: `owned` (already in library), `auto` (confident, pre-selected), `c
 | Method | Path | Body → Response |
 |---|---|---|
 | GET | `/api/imports` | `ImportOut[]` — the user's imports, newest first |
+| POST | `/api/imports/spotify` | multipart `files`: `Playlist*.json` and/or `YourLibrary.json` of a Spotify account-data export (1–32 files, 8 MB in all, 10 000 entries) → `ImportOut` (`source="spotify"`, `method="file"`, `status="preview"`); then `/start` as for Yandex. `/sync` → `409` (a new export is a new import). `400` not a Spotify export / no music, `413` too large |
 | POST | `/api/imports` | `ImportIn {source: "yandex", method, token?, url?}` → `ImportOut`. `method`: `device` — sign-in by code: `status="auth"`, `auth {user_code, verification_url, expires_at}` (the user enters the code at ya.ru/device; the Hub waits for it, ~5 min); `token` — a Yandex Music token pasted by hand; `profile` — `url` of an open profile (`music.yandex.ru/users/<login>/…`) or the login, no sign-in. `400` bad link / empty token / Yandex refused the code |
 | GET | `/api/imports/{id}` | `ImportOut` |
 | GET | `/api/imports/{id}/items?collection_id=&status=&match=&offset=0&limit=200` | `ImportItemsOut {items: [ImportItemOut], total}` — rows in the service's order; `status`, `match` — comma lists (the report: `match=probable`, `match=not_found`, `status=failed`) |
@@ -530,6 +537,7 @@ over, liked albums and artists the library has get ★. The sign-in token is kep
 | POST | `/share-target` | Fallback for Web Share Target if the service worker didn't handle it: images → new assistant task, audio → uploads; redirects to `/#/assistant/{id}` or `/#/upload` (the service worker's path, `/#/share`, opens a new assistant chat with the shared screenshots or text instead) |
 | GET | `/healthz` | `HealthOut` (no auth). `capabilities` includes `typed_favorites_v1`: new clients may send typed events/targets and causal rollback only when present. `launch_events_v1` — the Hub stores `launch_id`/`launch_origin` of `PlayEventIn`; `wave_origin_v1` — it keeps `origin`/`client`/`restart_of` of `WaveStartIn` (an older Hub ignores them silently, clients gate on these anyway). `smart_shuffle_v1` — the smart shuffle's endpoints exist (`/api/smart-shuffle/*`). `favorite_compensation_chains_v1` additionally permits retraction of compensations (late accept); clients retain chain events until this separate capability is present. `web_build` — id of the PWA build the Hub serves (`<meta name="hm-build">` of `index.html`, `null` without a build): an open page with another id reloads itself (`web/src/lib/update.ts`) |
 | GET | `/api/system/health` | `HealthOut` with provider health (admin) |
+| GET | `/api/system/soulseek?search=false` | `SoulseekStatusOut {state, search_matches, search_error}` (admin): `state` `disabled` (no account in .env), `unreachable`, `auth_error` (API key), `connecting`, `disconnected`, `ready`. `search=true` and `ready`: a test search, `search_matches` — files found |
 
 ### Free chat (stage 3.8)
 | Method | Path | Body → Response |

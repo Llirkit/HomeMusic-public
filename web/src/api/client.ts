@@ -55,6 +55,7 @@ import type {
   SearchOut,
   SearchHistoryOut,
   SearchTracksOut,
+  SoulseekStatusOut,
   StarIn,
   StarOut,
   StarredOut,
@@ -248,6 +249,9 @@ export const api = {
   createInvite: (body: InviteIn) => request<InviteOut>('POST', '/api/admin/invites', { json: body }),
   deleteInvite: (id: number) => request<OkOut>('DELETE', `/api/admin/invites/${id}`),
 
+  soulseekStatus: (search = false, signal?: AbortSignal) =>
+    request<SoulseekStatusOut>('GET', withQuery('/api/system/soulseek', { search: search ? 'true' : undefined }), { signal }),
+
   // search / catalog
   search: (q: string, signal?: AbortSignal) => cachedGet<SearchOut>(withQuery('/api/search', { q }), signal),
   searchHistory: (signal?: AbortSignal) => request<SearchHistoryOut>('GET', '/api/search/history', { signal }),
@@ -364,6 +368,11 @@ export const api = {
   // imports from music services
   imports: (signal?: AbortSignal) => request<ImportOut[]>('GET', '/api/imports', { signal }),
   createImport: (body: ImportIn) => request<ImportOut>('POST', '/api/imports', { json: body }),
+  importSpotify: (files: File[]) => {
+    const form = new FormData();
+    for (const file of files) form.append('files', file);
+    return request<ImportOut>('POST', '/api/imports/spotify', { form });
+  },
   importGet: (id: number, signal?: AbortSignal) => request<ImportOut>('GET', `/api/imports/${id}`, { signal }),
   importItems: (id: number, q: { collection_id?: number; status?: string; match?: string; offset?: number; limit?: number }, signal?: AbortSignal) =>
     request<ImportItemsOut>('GET', withQuery(`/api/imports/${id}/items`, q), { signal }),

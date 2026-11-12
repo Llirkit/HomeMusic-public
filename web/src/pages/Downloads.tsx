@@ -88,7 +88,7 @@ export function DownloadsPage() {
         <Link key={imp.id} to={`/import/${imp.id}`} className="card mx-4 mb-3 flex items-center gap-3 p-3 hover:bg-hover">
           <Icon name="transfer" size={22} className="shrink-0 text-accent" />
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-semibold">Перенос из Яндекс Музыки</span>
+            <span className="block truncate text-sm font-semibold">{imp.source === 'spotify' ? 'Перенос из Spotify' : 'Перенос из Яндекс Музыки'}</span>
             <span className="block truncate text-xs text-muted">
               {imp.stats.pending ? `сопоставляем · осталось ${imp.stats.pending}` : `скачано ${imp.stats.done} · качается ${imp.stats.downloading}`}
             </span>

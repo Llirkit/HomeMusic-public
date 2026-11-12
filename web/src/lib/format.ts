@@ -88,6 +88,8 @@ export function yearOf(a: { year?: number | null; release_date?: string | null }
 
 export function providerLabel(p?: string | null): string {
   switch (p) {
+    case 'soulseek':
+      return 'Soulseek';
     case 'hitmoz':
       return 'hitmoz';
     case 'hitmos_fm':

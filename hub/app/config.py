@@ -38,6 +38,20 @@ class HitmosFmCfg(BaseModel):
     rate_per_sec: float = 1.0
 
 
+class SoulseekCfg(BaseModel):
+    """Soulseek (slskd): a background source for library downloads only, never for listening (a peer's queue and
+    the whole-file transfer take seconds to minutes). It is tried first and takes only files better than the
+    regular sources give: FLAC by default."""
+    format: Literal["any", "flac", "mp3"] = "flac"
+    min_mp3_bitrate_kbps: int = Field(default=320, ge=0, le=320)
+    min_flac_bit_depth: int = Field(default=0, ge=0, le=32)
+    min_flac_sample_rate_hz: int = Field(default=0, ge=0, le=384_000)
+    max_file_mb: int = Field(default=200, ge=1, le=1000)
+    search_timeout_s: float = Field(default=4, ge=1, le=15)  # per search variant
+    transfer_timeout_s: float = Field(default=90, ge=5, le=600)  # includes the peer's queue
+    parallel_transfers: int = Field(default=3, ge=1, le=12)
+
+
 class YtdlpCfg(BaseModel):
     prefer_original_codec: bool = True
     search_prefix: str = "ytsearch5:"
@@ -125,6 +139,7 @@ class AppConfig(BaseModel):
     sources: SourcesCfg = SourcesCfg()
     hitmoz: HitmozCfg = HitmozCfg()
     hitmos_fm: HitmosFmCfg = HitmosFmCfg()
+    soulseek: SoulseekCfg = SoulseekCfg()
     ytdlp: YtdlpCfg = YtdlpCfg()
     matching: MatchingCfg = MatchingCfg()
     postcheck: PostcheckCfg = PostcheckCfg()
@@ -195,6 +210,18 @@ class Settings(BaseSettings):
 
     outbound_proxy: str = ""
     outbound_proxy_hosts: str = ""
+
+    # Soulseek through slskd (the `soulseek` Compose profile). Off unless the account (username and password,
+    # which slskd itself reads) and the API key are all set.
+    slskd_url: str = "http://slskd:5030"
+    slskd_api_key: str = ""
+    slskd_slsk_username: str = ""
+    slskd_slsk_password: str = ""
+    slskd_download_dir: Path = Path("/soulseek-downloads")
+
+    @property
+    def soulseek_enabled(self) -> bool:
+        return bool(self.slskd_url and self.slskd_api_key and self.slskd_slsk_username and self.slskd_slsk_password)
 
     # set by tests to skip background workers / scheduled tasks
     disable_background: bool = False

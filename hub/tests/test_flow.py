@@ -168,6 +168,101 @@ async def run_one_job() -> None:
     await run_job(job)
 
 
+def soulseek_handler(tmp_path, filename: str, media: bytes, *, online: bool = True, posted: list | None = None):
+    """A fake slskd: one peer has `filename`; a queued batch finishes at once into its folder."""
+    from uuid import uuid4
+
+    transfer = {"id": str(uuid4()), "filename": filename, "size": len(media), "state": "Completed, Succeeded"}
+
+    def slskd(request):
+        route = request.url.path.removeprefix("/api/v0")
+        if route == "/application":
+            return httpx.Response(200, json={"server": {"isLoggedIn": online}})
+        assert online, "an offline Soulseek client is not asked to search"
+        if route == "/searches":
+            return httpx.Response(200, json={})
+        if route.endswith("/responses"):
+            return httpx.Response(200, json=[{"username": "peer", "files": [
+                {"filename": filename, "size": len(media), "length": 4},
+            ]}])
+        if route.startswith("/searches/"):
+            return httpx.Response(204) if request.method == "DELETE" else httpx.Response(200, json={"isComplete": True})
+        if route.endswith("/downloads/peer"):
+            return httpx.Response(404)
+        if route.endswith("/downloads/batches"):
+            payload = json.loads(request.content)
+            if posted is not None:
+                posted.append(payload)
+            transfer["batchId"] = payload["id"]
+            directory = tmp_path / payload["options"]["destination"]
+            directory.mkdir(parents=True)
+            (directory / Path(filename.replace("\\", "/")).name).write_bytes(media)
+            return httpx.Response(201, json={"batch": {"transfers": [transfer]}, "failures": []})
+        assert route.endswith(f"/downloads/peer/{transfer['id']}")
+        return httpx.Response(200, json=transfer)
+
+    return slskd
+
+
+async def test_soulseek_goes_first_for_library_downloads(env, tmp_path):
+    from app.config import MatchingCfg, SoulseekCfg
+    from app.providers.soulseek import SoulseekProvider
+    from app.services import svc
+
+    filename = r"@@music\Kino\01_Gruppa-Krovi-Kino.mp3"
+    media, posted = env["src"].read_bytes(), []
+    async with httpx.AsyncClient(transport=httpx.MockTransport(
+            soulseek_handler(tmp_path, filename, media, posted=posted))) as client:
+        svc.providers["soulseek"] = SoulseekProvider("http://slskd.test", "test", tmp_path,
+                                                    SoulseekCfg(format="any", min_mp3_bitrate_kbps=0), MatchingCfg(),
+                                                    client)
+        api = env["client"]
+        # the Files tab searches Soulseek only by name: a search there takes seconds
+        files = (await api.get("/api/search/providers", params={"q": "Кино - Группа крови"})).json()["candidates"]
+        assert files and all(c["provider"] != "soulseek" for c in files)
+        response = await api.get("/api/search/providers", params={"q": "Кино - Группа крови", "provider": "soulseek"})
+        candidates = response.json()["candidates"]
+        assert len(candidates) == 1 and candidates[0]["title"] == "Группа крови"
+        response = await api.post("/api/downloads", json={"items": [{"artist": "Кино", "title": "Группа крови"}]})
+        assert response.status_code == 200, response.text
+        await drain_jobs()
+        item = (await api.get("/api/downloads")).json()[0]
+        assert item["status"] == "done" and item["provider"] == "soulseek", item
+        assert item["nd_song_id"] == "nd0" and env["fake"].fetched == 0
+        assert posted[0]["files"] == [{"filename": filename, "size": len(media)}] and len(posted) == 1
+        # the file left slskd's folder: the library holds the only copy
+        assert not list((tmp_path / "homemusic").iterdir())
+
+
+async def test_download_skips_soulseek_while_it_is_offline(env, tmp_path):
+    from app.config import MatchingCfg, SoulseekCfg
+    from app.providers.soulseek import SoulseekProvider
+    from app.services import svc
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(
+            soulseek_handler(tmp_path, "x.flac", b"", online=False))) as client:
+        svc.providers["soulseek"] = SoulseekProvider("http://slskd.test", "test", tmp_path, SoulseekCfg(),
+                                                    MatchingCfg(), client)
+        api = env["client"]
+        status = (await api.get("/api/system/soulseek?search=true")).json()
+        assert status == {"state": "disconnected", "search_matches": None, "search_error": False}
+        response = await api.post("/api/downloads", json={"items": [{"artist": "Кино", "title": "Группа крови"}]})
+        assert response.status_code == 200
+        await drain_jobs()
+        item = (await api.get("/api/downloads")).json()[0]
+        assert item["status"] == "done" and item["provider"] == "hitmoz" and env["fake"].fetched == 1
+
+
+def test_soulseek_is_off_without_its_account(monkeypatch):
+    from app.config import Settings
+
+    for var in ("SLSKD_API_KEY", "SLSKD_SLSK_USERNAME", "SLSKD_SLSK_PASSWORD", "SLSKD_URL"):
+        monkeypatch.delenv(var, raising=False)
+    assert not Settings().soulseek_enabled
+    assert not Settings(slskd_api_key="k", slskd_slsk_username="me").soulseek_enabled
+    assert Settings(slskd_api_key="k", slskd_slsk_username="me", slskd_slsk_password="p").soulseek_enabled
+
+
 async def test_download_import_scan_playlist_dedupe(env):
     c = env["client"]
     r = await c.post("/api/downloads", json={

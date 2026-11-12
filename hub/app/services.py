@@ -32,7 +32,8 @@ class Services:
         from app.providers.reuploads import SoundcloudProvider, YtReuploadProvider
         from app.providers.ytdlp import YoutubeAccess, YtdlpProvider
 
-        cfg = get_settings().cfg
+        settings = get_settings()
+        cfg = settings.cfg
         hitmoz = HitmozProvider(cfg.hitmoz)
         youtube = YoutubeAccess(cfg.ytdlp)
         self.providers = {
@@ -42,6 +43,12 @@ class Services:
             "yt_reupload": YtReuploadProvider(cfg.ytdlp, access=youtube),
             "soundcloud": SoundcloudProvider(cfg.ytdlp),
         }
+        if settings.soulseek_enabled:
+            from app.providers.soulseek import SoulseekProvider
+
+            # not in `sources`: library downloads try it first (`jobs.downloads`), listening never does
+            self.providers["soulseek"] = SoulseekProvider(settings.slskd_url, settings.slskd_api_key,
+                                                          settings.slskd_download_dir, cfg.soulseek, cfg.matching)
         self.deezer = DeezerClient(cfg.catalog)
         self.hitmoz_catalog = HitmozCatalog(hitmoz)
         self.musicbrainz = MusicBrainzClient(cfg.catalog)

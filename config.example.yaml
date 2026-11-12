@@ -27,6 +27,18 @@ hitmos_fm:
   domains: [rus.hitmos.fm]
   rate_per_sec: 1.0
 
+# Soulseek (slskd): on only with its account in .env (SLSKD_*). Library downloads try it first and take only files
+# better than the regular sources give; listening never uses it (a peer's queue takes seconds to minutes).
+soulseek:
+  format: flac  # flac (lossless only), any (FLAC or MP3), mp3
+  min_mp3_bitrate_kbps: 320  # with format any/mp3
+  min_flac_bit_depth: 0  # 0 leaves the filter off
+  min_flac_sample_rate_hz: 0
+  max_file_mb: 200
+  search_timeout_s: 4  # per search variant (up to 4 variants for a track it lacks)
+  transfer_timeout_s: 90  # includes the peer's queue
+  parallel_transfers: 3
+
 ytdlp:
   # bestaudio without re-encoding (opus/m4a) is playable by Tempus/Navidrome
   prefer_original_codec: true

@@ -637,14 +637,14 @@ class AssistantTextIn(BaseModel):
 
 # --- imports from music services ----------------------------------------------------------
 
-ImportSource = Literal["yandex"]
-ImportMethod = Literal["device", "token", "profile"]
+ImportSource = Literal["yandex", "spotify"]
+ImportMethod = Literal["device", "token", "profile", "file"]  # file: a Spotify export (POST /api/imports/spotify)
 ImportMode = Literal["economy", "full"]
 
 
 class ImportIn(BaseModel):
-    source: ImportSource = "yandex"
-    method: ImportMethod = "device"
+    source: Literal["yandex"] = "yandex"  # a Spotify export comes as files: POST /api/imports/spotify
+    method: Literal["device", "token", "profile"] = "device"
     token: str | None = None  # method "token"
     url: str | None = None  # method "profile": a link to the profile or the login
 
@@ -875,6 +875,13 @@ class DislikeOut(BaseModel):
 
 
 MixMode = Literal["normal", "favorites", "discover"]
+
+
+class SoulseekStatusOut(BaseModel):
+    """GET /api/system/soulseek (admin): `disabled` — no Soulseek account in .env, the source is off."""
+    state: Literal["disabled", "unreachable", "auth_error", "connecting", "disconnected", "ready"]
+    search_matches: int | None = None  # files a test search found (search=true)
+    search_error: bool = False
 
 
 class MixTrackOut(TrackOut):
