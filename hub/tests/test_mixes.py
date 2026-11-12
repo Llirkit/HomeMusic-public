@@ -469,6 +469,42 @@ async def test_playlist_failure_retries_without_another_download(env, monkeypatc
     assert "nd5999" in env["nd"].playlists[pid]["songs"]
 
 
+async def test_song_supplied_by_another_import_joins_mix_before_its_queued_download(env, monkeypatch) -> None:
+    from app.db import session_scope
+    from app.jobs import queue
+    from app.jobs.downloads import mixes_done
+    from app.mixes import core
+    from app.models import DownloadBatch, DownloadItem, Job, MixSettings, utcnow
+
+    me = env["admin"]
+    await history(me)
+    fake_generators(monkeypatch, [new_track(5000 + i) for i in range(10)])
+    mix = await core.build_for(me)
+    item = next(r for r in await mix_rows(mix.id) if r.state == "active" and r.download_item_id)
+    n = int(item.ref.split(":")[1])
+    tid = await add_track(n, music=None)
+    async with session_scope() as s:
+        assert (await s.get(DownloadItem, item.download_item_id)).status == "queued"
+        batch = DownloadBatch(user_id=me, origin="import")
+        s.add(batch)
+        await s.flush()
+        other = DownloadItem(user_id=me, batch_id=batch.id, status="done", track_id=tid,
+                             query_json={"meta": {"track_ref": item.ref}})
+        s.add(other)
+        await mixes_done(s, [other])
+        job = (await s.execute(select(Job).where(Job.kind == "mix_sync"))).scalar_one()
+        job.run_after = utcnow()
+    job = await queue._claim("sync")
+    assert job.kind == "mix_sync"
+    await queue.run_job(job)
+    async with session_scope() as s:
+        pid = (await s.get(MixSettings, me)).nd_playlist_id
+    assert f"nd{n}" in env["nd"].playlists[pid]["songs"]
+    r = await env["client"].get("/api/mixes/today")
+    songs = [t["nd_song_id"] for t in r.json()["mix"]["tracks"] if t.get("nd_song_id")]
+    assert songs == env["nd"].playlists[pid]["songs"]
+
+
 async def test_next_mix_keeps_the_playlist_and_closes_the_old_one(env, monkeypatch) -> None:
     from app.db import session_scope
     from app.mixes import core

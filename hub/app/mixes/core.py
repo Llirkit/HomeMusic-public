@@ -27,7 +27,7 @@ from app.config import get_settings
 from app.db import session_scope
 from app.events import bus
 from app.jobs.queue import PRIORITY_IMPORT, enqueue, handler, notify
-from app.library.owned import ACTIVE_STATUSES, quiet
+from app.library.owned import ACTIVE_STATUSES, annotate_tracks, quiet
 from app.mixes import build as builder
 from app.mixes.taste import build_profile
 from app.models import (
@@ -98,7 +98,13 @@ async def enqueue_sync(s: AsyncSession, mix_id: int, *, delay_s: float = SYNC_DE
 
 async def downloads_changed(s: AsyncSession, items: list[DownloadItem]) -> None:
     """Downloads of mixes finished or failed (`jobs.downloads`): their mixes are synced soon."""
-    for mix_id in {int(m["id"]) for i in items if (m := (i.query_json or {}).get("mix"))}:
+    mix_ids = {int(m["id"]) for i in items if (m := (i.query_json or {}).get("mix"))}
+    ready_refs = {((i.query_json or {}).get("meta") or {}).get("track_ref") for i in items if i.status == "done"}
+    ready_refs.discard(None)
+    if ready_refs:
+        mix_ids.update((await s.execute(select(MixItem.mix_id).join(Mix, Mix.id == MixItem.mix_id).where(
+            Mix.status == "active", MixItem.state.in_(("active", "reserve")), MixItem.ref.in_(ready_refs)))).scalars())
+    for mix_id in mix_ids:
         await enqueue_sync(s, mix_id)
 
 
@@ -246,6 +252,15 @@ async def sync(mix_id: int) -> bool:
             if it.track_id and not it.nd_song_id:
                 it.nd_song_id = (await s.execute(select(Track.nd_song_id).where(Track.id == it.track_id))
                                  ).scalar_one_or_none()
+        # Another import/download may already have supplied a song. Use the same ownership rules as mix_out,
+        # so its ready count and the Navidrome playlist agree without waiting for this mix's queued copy.
+        missing = [i for i in items if not i.nd_song_id and i.state in ("active", "reserve")
+                   and (i.features_json or {}).get("track")]
+        available = await annotate_tracks(s, [CatalogTrack.model_validate(i.features_json["track"])
+                                              for i in missing], mix.user_id)
+        for it, track in zip(missing, available, strict=True):
+            if track.nd_song_id:
+                it.track_id, it.nd_song_id = track.library_track_id, track.nd_song_id
         reserve = [i for i in items if i.state == "reserve"]
         for it in items:
             dl = dls.get(it.download_item_id) if it.download_item_id else None

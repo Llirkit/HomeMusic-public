@@ -677,7 +677,7 @@ async def imports_done(s: AsyncSession, items: list[DownloadItem]) -> None:
 
 
 async def mixes_done(s: AsyncSession, items: list[DownloadItem]) -> None:
-    if any((i.query_json or {}).get("mix") for i in items):
+    if items:
         from app.mixes.core import downloads_changed
 
         await downloads_changed(s, items)
@@ -698,8 +698,8 @@ async def star_liked(s: AsyncSession, items: list[DownloadItem]) -> None:
     off_by_user: dict[int, list[str]] = {}
     for i in liked:
         if nd_id := songs.get(i.track_id):
-            from app.favorites import record, remember, snapshot
             from app.api.schemas import FavoriteTarget
+            from app.favorites import record, remember, snapshot
             from app.models import PlayEvent
 
             i = await s.get(DownloadItem, i.id, populate_existing=True)
@@ -717,7 +717,7 @@ async def star_liked(s: AsyncSession, items: list[DownloadItem]) -> None:
             await remember(s, target, extra_aliases=extra)
             states = await snapshot(s, i.user_id)
             state = next((x for x in states.values() if x.target_type == "track" and
-                          (x.nd_id == nd_id or ref and x.ref == ref)), None)
+                          (x.nd_id == nd_id or (ref and x.ref == ref))), None)
             if state and not state.liked:
                 # A terminal failure rolls back the promise, but a successful manual retry may restore it.
                 if original is None or state.event.event_id != original.event_id:
