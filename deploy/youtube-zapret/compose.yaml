@@ -1,0 +1,46 @@
+# Add this file to the SAME compose invocation as your deployment file.
+# Example: docker compose -f compose.server.yaml -f deploy/youtube-zapret/compose.yaml up -d --build
+x-youtube-zapret: &zapret
+  image: homemusic-youtube-zapret:local
+  restart: unless-stopped
+  cap_drop: [ALL]
+  cap_add: [NET_ADMIN, NET_RAW, SETUID, SETGID, KILL]
+  security_opt: ["no-new-privileges:true"]
+  read_only: true
+  tmpfs: ["/tmp:size=8m,mode=1777"]
+  environment:
+    ZAPRET_TLS_STRATEGY: ${ZAPRET_TLS_STRATEGY:-disorder}
+  healthcheck:
+    test: ["CMD", "python3", "-c", "from pathlib import Path; raise SystemExit(not Path('/tmp/ready').exists())"]
+    interval: 15s
+    timeout: 3s
+    retries: 3
+    start_period: 10s
+  mem_limit: 128m
+  logging:
+    driver: local
+    options: {max-size: "2m", max-file: "2"}
+
+services:
+  hub:
+    sysctls:
+      net.netfilter.nf_conntrack_acct: "1"
+    depends_on:
+      youtube-pot-zapret: {condition: service_healthy}
+  youtube-pot:
+    sysctls:
+      net.netfilter.nf_conntrack_acct: "1"
+  youtube-zapret:
+    <<: *zapret
+    build:
+      context: ./deploy/youtube-zapret
+    network_mode: service:hub
+    depends_on:
+      hub: {condition: service_healthy}
+  youtube-pot-zapret:
+    <<: *zapret
+    environment:
+      ZAPRET_TLS_STRATEGY: ${ZAPRET_POT_TLS_STRATEGY:-fake-disorder}
+    network_mode: service:youtube-pot
+    depends_on:
+      youtube-pot: {condition: service_healthy}
