@@ -314,6 +314,29 @@ async def test_tool_ignored_but_json_in_content() -> None:
 
 
 @respx.mock
+@pytest.mark.parametrize("string_arguments", [False, True])
+async def test_tool_envelope_in_content(string_arguments) -> None:
+    args = json.dumps(TRACKS_ARGS) if string_arguments else TRACKS_ARGS
+    content = json.dumps({"name": "report_tracks", "arguments": args})
+    respx.post(URL).mock(return_value=httpx.Response(200, json=completion(content=content)))
+    async with LLMClient(settings()) as client:
+        ex, _ = await extract_from_images([png(100, 100)], client)
+    assert len(ex.items) == 2
+    assert len(respx.calls) == 1
+
+
+@respx.mock
+async def test_truncated_output_is_typed_and_keeps_usage() -> None:
+    respx.post(URL).mock(return_value=httpx.Response(200, json=completion(content='{"title":', finish="length")))
+    async with LLMClient(settings()) as client:
+        with pytest.raises(llm_mod.LLMTruncatedError) as error:
+            await client.call_tool(system="name", user_content="songs", tool_name="mix_name",
+                                   tool_description="name", parameters={"type": "object"}, max_tokens=2048)
+    assert error.value.usage.tokens_out == 200
+    assert len(respx.calls) == 1
+
+
+@respx.mock
 async def test_auth_error_is_llm_error() -> None:
     respx.post(URL).mock(return_value=httpx.Response(401, json={"error": {"message": "No auth"}}))
     async with LLMClient(settings()) as llm:

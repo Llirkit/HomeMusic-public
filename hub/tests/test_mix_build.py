@@ -310,8 +310,45 @@ async def test_name_by_ai(db, monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert (title, desc) == ("Пост-панк на пятничное утро", "Кино и соседи.")
     assert "пятница" in asked["user_content"] and "утро" in asked["user_content"]
+    assert asked["max_tokens"] == 2048
     async with session_scope() as s:
         assert [(u.kind, u.cost_usd) for u in (await s.execute(select(AiUsage))).scalars()] == [("mix", 0.0004)]
+
+
+@pytest.mark.parametrize("failure", ["truncated_once", "truncated_always", "unavailable", "invalid"])
+async def test_name_retry_and_fallback(db, monkeypatch, failure) -> None:
+    from app.ai.llm import LLMClient, LLMError, LLMTruncatedError, LLMUsage
+    from app.config import get_settings
+    from app.db import session_scope
+    from app.models import User
+
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    get_settings.cache_clear()
+    calls = []
+
+    async def call_tool(self, **kw):
+        calls.append(kw["max_tokens"])
+        if failure.startswith("truncated") and (len(calls) == 1 or failure == "truncated_always"):
+            raise LLMTruncatedError(LLMUsage(tokens_out=kw["max_tokens"]))
+        if failure == "unavailable":
+            raise LLMError("offline")
+        return ({"title": [], "description": ""} if failure == "invalid" else
+                {"title": "Тихое пятничное утро", "description": "Знакомые и новые песни."}), LLMUsage(tokens_out=90)
+
+    monkeypatch.setattr(LLMClient, "call_tool", call_tool)
+    async with session_scope() as s:
+        s.add(User(id=1, nd_username="u", nd_password_enc="x"))
+    songs = [cand(1, "Кино")]
+    stats = {}
+    result = await b.name_mix(1, songs, b.local_now(NOW), stats)
+    assert calls == ([2048, 4096] if failure.startswith("truncated") else [2048])
+    if failure == "truncated_once":
+        assert result[0] == "Тихое пятничное утро"
+        assert stats["name_ai_status"] == "ok"
+        assert stats["name_tokens_out"] == 2138
+    else:
+        assert result == b.fallback_name(b.local_now(NOW), songs)
+        assert stats["name_ai_status"] == "fallback"
 
 
 async def test_build_counts_why_candidates_were_dropped_and_keeps_score_parts(db) -> None:
@@ -328,7 +365,7 @@ async def test_build_counts_why_candidates_were_dropped_and_keeps_score_parts(db
     for c in built.active + built.reserve:
         f = c.features()
         assert f["score_parts"]["total"] == c.score and f["score_parts"]["maturity"] is None
-        assert (f["profile"] is not None) == c.track.ref.startswith("dz:") and int(c.track.ref[3:]) < 30 or \
+        assert ((f["profile"] is not None) == c.track.ref.startswith("dz:") and int(c.track.ref[3:]) < 30) or \
             f["profile"] is None
     own = next(c for c in built.active if c.track.ref == "dz:0").features()["profile"]
     assert own == {"key": "dz:0", "s": 2.0, "positive": None, "negative": None, "artist_score": 2.0, "familiar": True}
