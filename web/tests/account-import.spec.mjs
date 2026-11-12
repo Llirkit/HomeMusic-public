@@ -199,6 +199,40 @@ for (const format of ['TXT', 'CSV']) test(`${format} upload shows preview, requi
 const sampleMix = (id) => ({ id, title: `Микс ${id}`, description: 'Песни по вашему вкусу', mode: 'normal', mode_title: 'Обычный',
   tracks: [], total: 0, ready: 0, created_at: '2026-11-12T12:00:00', status: 'active' });
 
+for (const route of ['/home', '/mix/1']) {
+  test(`ready mix updates immediately by SSE on ${route}, with polling paused`, async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    const state = await backend(page);
+    state.today.mix = { ...sampleMix(1), total: 2 };
+    state.mixes[1] = state.today.mix;
+    await page.addInitScript(() => {
+      window.hubTestSources = [];
+      window.EventSource = class extends EventTarget {
+        static CLOSED = 2;
+        readyState = 1;
+        constructor() { super(); window.hubTestSources.push(this); }
+        close() { this.readyState = 2; }
+      };
+    });
+    await page.clock.install({ time: new Date('2026-11-12T12:00:00Z') });
+    await page.clock.pauseAt(new Date('2026-11-12T12:00:01Z'));
+    await page.goto(`/#${route}`);
+    await expect(page.getByText(/(?:Скачано 0 из 2|качается 2)/)).toBeVisible();
+    state.today.mix = { ...state.today.mix, ready: 2, title: 'Готовые песни появились' };
+    state.mixes[1] = state.today.mix;
+    await page.evaluate(() => {
+      for (const source of window.hubTestSources.filter((s) => s.readyState === 1)) {
+        source.dispatchEvent(new MessageEvent('mix', { data: JSON.stringify({ mix_id: 1 }) }));
+      }
+    });
+    await expect(page.getByText('Готовые песни появились', { exact: true })).toBeVisible();
+    await expect(page.getByText(/(?:Скачано 0 из 2|качается 2)/)).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    expect(errors).toEqual([]);
+  });
+}
+
 test('regular user starts the first daily mix now; loading blocks duplicate clicks and completed mix appears', async ({ page }) => {
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));

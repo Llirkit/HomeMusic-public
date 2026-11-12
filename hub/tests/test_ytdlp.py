@@ -6,6 +6,7 @@ from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
@@ -560,12 +561,50 @@ def media_servers(monkeypatch: pytest.MonkeyPatch, *answering: str) -> list[str]
         return host in answering
 
     monkeypatch.setattr(ytdlp_mod, "_media_host_answers", answers)
+    monkeypatch.setattr(ytdlp_mod, "_media_url_answers", lambda url, headers=None: urlsplit(url).hostname in answering)
     return probed
 
 
 def test_media_mirrors_are_the_videos_other_cache_servers() -> None:
     assert ytdlp_mod.media_mirrors(GV) == [GV.replace("rr7---sn-isp1", "rr1---sn-far2")]
     assert ytdlp_mod.media_mirrors("https://g.test/140?mn=sn-a") == []  # not a YouTube media server
+
+
+def test_mirrors_try_rr1_when_fvip_belongs_to_another_cluster() -> None:
+    url = GV.replace("fvip=1", "fvip=4")
+    assert [urlsplit(u).hostname for u in ytdlp_mod.media_mirrors(url)] == [
+        "rr1---sn-far2.googlevideo.com", "rr4---sn-far2.googlevideo.com"]
+
+
+def test_mirror_that_only_answers_tls_is_rejected(monkeypatch) -> None:
+    media_servers(monkeypatch, "rr1---sn-far2.googlevideo.com", "rr4---sn-far2.googlevideo.com")
+    monkeypatch.setattr(ytdlp_mod, "_media_url_answers", lambda url, headers=None: "rr4---" in url)
+    assert urlsplit(ytdlp_mod.answering_url(GV.replace("fvip=1", "fvip=4"))).hostname == "rr4---sn-far2.googlevideo.com"
+
+
+@pytest.mark.parametrize("message,retry", [("Read timed out", True), ("HTTP Error 403", False)])
+async def test_fetch_refreshes_metadata_once_only_for_transport_failures(monkeypatch, tmp_path, message, retry) -> None:
+    attempts = []
+
+    class FlakyYDL(FakeYDL):
+        def process_ie_result(self, info, download=False):
+            attempts.append(info)
+            if len(attempts) == 1:
+                raise ytdlp_mod.DownloadError(message)
+            return super().process_ie_result(info, download)
+
+    monkeypatch.setattr(ytdlp_mod.yt_dlp, "YoutubeDL", FlakyYDL)
+    monkeypatch.setattr(FakeYDL, "formats", [])
+    p = YtdlpProvider(YtdlpCfg())
+    c = entry_to_candidate(FLAT_TOPIC)
+    if retry:
+        assert (await p.fetch(c, tmp_path)).is_file()
+        assert len(attempts) == 2
+    else:
+        with pytest.raises(ProviderError):
+            await p.fetch(c, tmp_path)
+        assert len(attempts) == 1
+    await p.aclose()
 
 
 @pytest.mark.parametrize(("answering", "expected"), [

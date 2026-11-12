@@ -1,4 +1,4 @@
-"""An opt-in YouTube-only NFQUEUE service sharing only the Hub's network namespace."""
+"""An opt-in media-domain NFQUEUE service sharing only its parent service's network namespace."""
 
 import os
 import signal

@@ -1,4 +1,4 @@
-# YouTube-only zapret2 for HomeMusic
+# YouTube and SoundCloud zapret2 for HomeMusic
 
 Optional deployment overlay for Linux Docker inside LXC 108. It builds upstream zapret2 at
 `c08c412dd8b39a456ef42b42530b150f6f02f7e2`; it does not run upstream firewall/install scripts.
@@ -10,6 +10,7 @@ load these modules on the host if unavailable, without installing firewall rules
 
 Only the beginning of outbound TCP/443 connections is queued. Private/local destinations are excluded.
 nfqws2 changes TLS ClientHello packets only for the domains in `hosts.txt`, including their subdomains.
+The list covers YouTube/Googlevideo and SoundCloud/Sndcdn; the directory and service names are retained for compatibility.
 Other HTTPS traffic passes unchanged. This deployment covers yt-dlp's HTTPS/TCP traffic; it does not
 intercept browser QUIC/UDP traffic or change DNS, default routes or public IP addresses.
 

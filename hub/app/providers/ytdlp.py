@@ -27,6 +27,7 @@ from http.cookiejar import LoadError, MozillaCookieJar
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote_plus, urlsplit
+from urllib.request import ProxyHandler, Request, build_opener
 
 import httpx
 import yt_dlp
@@ -169,17 +170,33 @@ def media_mirrors(url: str) -> list[str]:
     qs = parse_qs(parts.query)
     fvip = (qs.get("fvip") or ["1"])[0]
     servers = [s for s in (qs.get("mn") or [""])[0].split(",") if s and f"---{s}." not in host]
-    return [parts._replace(netloc=f"rr{fvip}---{s}{MEDIA_HOST_SUFFIX}").geturl() for s in servers]
+    # The alternate cluster can use rr1 even when fvip points to rr4 on the original cluster.
+    prefixes = list(dict.fromkeys(("1", fvip)))
+    return [parts._replace(netloc=f"rr{prefix}---{s}{MEDIA_HOST_SUFFIX}").geturl()
+            for s in servers for prefix in prefixes]
 
 
-def answering_url(url: str) -> str:
+def _media_url_answers(url: str, headers: dict | None = None) -> bool:
+    """A mirror must serve bytes of this signed file, not merely complete TLS (wrong rr hosts can return 403)."""
+    try:
+        request = Request(url, headers={**(headers or {}), "Range": "bytes=0-0"})
+        # Proxied providers skip direct probing; never pick up unrelated system proxy variables here.
+        with build_opener(ProxyHandler({})).open(request, timeout=MEDIA_PROBE_TIMEOUT_S) as response:
+            return response.status in (200, 206) and bool(response.read(1))
+    except (OSError, ValueError):
+        return False
+
+
+def answering_url(url: str, *, headers: dict | None = None, avoid_hosts: set[str] | None = None) -> str:
     """`url`, or the same file on another of the video's cache servers when its own doesn't answer. YouTube may
     send a client to a cache inside its ISP that hangs on the TLS handshake for some videos; yt-dlp has no
     fallback and gives up after its retries."""
     host = urlsplit(url).hostname or ""
-    if not host.endswith(MEDIA_HOST_SUFFIX) or _media_host_answers(host):
+    if not host.endswith(MEDIA_HOST_SUFFIX) or (host not in (avoid_hosts or ()) and _media_host_answers(host)):
         return url
-    return next((alt for alt in media_mirrors(url) if _media_host_answers(urlsplit(alt).hostname or "")), url)
+    return next((alt for alt in media_mirrors(url)
+                 if urlsplit(alt).hostname not in (avoid_hosts or ())
+                 and _media_host_answers(urlsplit(alt).hostname or "") and _media_url_answers(alt, headers)), url)
 
 
 def ad_wait_s(fmt: dict, now: float) -> float:
@@ -197,12 +214,12 @@ def _log_switch(old: str, new: str) -> None:
         log.info("youtube media server %s doesn't answer, using %s", urlsplit(old).hostname, urlsplit(new).hostname)
 
 
-def on_answering_servers(info: dict) -> dict:
+def on_answering_servers(info: dict, *, avoid_hosts: set[str] | None = None) -> dict:
     """An extraction whose formats on a media server that doesn't answer point to one that does."""
     switched: dict[str | None, str] = {}
     for f in info.get("formats") or []:
         if isinstance(url := f.get("url"), str):
-            f["url"] = answering_url(url)
+            f["url"] = answering_url(url, headers=info.get("http_headers"), avoid_hosts=avoid_hosts)
             switched.setdefault(urlsplit(url).hostname, f["url"])
     for host, url in switched.items():
         _log_switch(f"https://{host}/", url)
@@ -762,11 +779,23 @@ class YtdlpProvider:
 
         def download() -> Path:
             with self._youtube_dl(opts) as ydl:
-                info = ydl.extract_info(self.media_url(c), download=False, process=False)
-                # A direct TLS probe cannot tell whether a cache is reachable through the proxy.
-                if not self._proxy:
-                    info = on_answering_servers(info)
-                info = ydl.process_ie_result(info, download=True)
+                avoid_hosts: set[str] = set()
+                for attempt in range(2):
+                    info = ydl.extract_info(self.media_url(c), download=False, process=False)
+                    # A direct probe cannot tell whether a cache is reachable through the proxy.
+                    if not self._proxy:
+                        info = on_answering_servers(info, avoid_hosts=avoid_hosts)
+                    try:
+                        info = ydl.process_ie_result(info, download=True)
+                        break
+                    except DownloadError as e:
+                        text = str(e).lower()
+                        transient = any(s in text for s in ("timed out", "timeout", "connection reset", "remote end closed"))
+                        if attempt or not transient or cancelled.is_set():
+                            raise
+                        avoid_hosts.update(h for h in re.findall(r"host=['\"]([^'\"]+)", str(e))
+                                           if h.endswith(MEDIA_HOST_SUFFIX))
+                        log.info("%s: transport failed, refreshing media metadata once", self.name)
             for rd in (info or {}).get("requested_downloads") or []:
                 if (fp := rd.get("filepath")) and Path(fp).is_file():
                     return Path(fp)

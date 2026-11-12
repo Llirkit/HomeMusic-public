@@ -5,6 +5,7 @@ import { TrackRow, listenTrack } from '../components/catalog';
 import { Icon } from '../components/Icon';
 import { Button, Cover, ErrorState, IconButton, PageHeader, ProgressBar, Segmented, SkeletonRows, Spinner, cx } from '../components/ui';
 import { fmtLength, plural } from '../lib/format';
+import { useHubEvent } from '../lib/events';
 import { useAsync, useDebounced, useInterval } from '../lib/hooks';
 import { listen } from '../lib/listen';
 import { canPlay, canPlayAll, playList, playTracks } from '../lib/player';
@@ -57,6 +58,8 @@ export function MixCover({ tracks, className, large }: { tracks: readonly MixTra
 /** Top of the catalog: today's mix, the build under way, or «Что вы слушаете?». */
 export function MixCard() {
   const res = useAsync((s) => api.mixToday(s), []);
+  useHubEvent('mix', () => res.reload(true));
+  useHubEvent('reconnect', () => res.reload(true));
   const [submitting, setSubmitting] = useState(false);
   const [waitingForMix, setWaitingForMix] = useState(false);
   const previousMix = useRef<number | null>(null);
@@ -161,6 +164,8 @@ export function MixCard() {
 export function MixPage({ id }: { id: number }) {
   // an unknown mix (an old link) is null: the page goes to today's
   const res = useAsync((s) => Promise.all([api.mix(id, s).catch((e) => (e instanceof ApiError && e.status === 404 ? null : Promise.reject(e))), api.mixToday(s)]), [id]);
+  useHubEvent('mix', () => res.reload(true));
+  useHubEvent('reconnect', () => res.reload(true));
   const [rebuilding, setRebuilding] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const requestPending = useRef(false);

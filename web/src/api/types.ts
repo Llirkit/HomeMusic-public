@@ -868,6 +868,7 @@ export interface BatchEvent {
 }
 
 export interface HubEventMap {
+  mix: { mix_id: number };
   download: DownloadItemOut;
   assistant: AssistantEvent;
   library: LibraryEvent;

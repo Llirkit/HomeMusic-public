@@ -398,6 +398,77 @@ async def test_a_song_that_did_not_download_gives_its_place_to_the_reserve(env, 
     assert "nd5999" in env["nd"].playlists[pid]["songs"]
 
 
+async def test_ready_mix_song_syncs_while_background_download_slots_are_full(env, monkeypatch) -> None:
+    from app.db import session_scope
+    from app.events import bus
+    from app.jobs import queue
+    from app.mixes import core
+    from app.models import DownloadItem, MixSettings
+
+    me = env["admin"]
+    await history(me)
+    fake_generators(monkeypatch, [new_track(5000 + i) for i in range(10)])
+    mix = await core.build_for(me)
+    done = next(r for r in await mix_rows(mix.id) if r.state == "active" and r.download_item_id)
+    tid = await add_track(5999, music=None)
+    async with session_scope() as s:
+        dl = await s.get(DownloadItem, done.download_item_id)
+        dl.status, dl.track_id = "done", tid
+    # Both background slots are occupied; the third worker must still publish ready songs.
+    assert (await queue._claim("download-1")).kind == "download_item"
+    assert (await queue._claim("download-2")).kind == "download_item"
+    async with session_scope() as s:
+        await core.enqueue_sync(s, mix.id, delay_s=0)
+        await core.enqueue_sync(s, mix.id, delay_s=0)
+    q = bus.subscribe(me)
+    try:
+        job = await queue._claim("sync")
+        assert job.kind == "mix_sync" and job.priority == 0
+        await queue.run_job(job)
+        import json
+
+        event = json.loads(q.get_nowait())
+        assert event == {"event": "mix", "data": {"mix_id": mix.id}}
+    finally:
+        bus.unsubscribe(me, q)
+    async with session_scope() as s:
+        pid = (await s.get(MixSettings, me)).nd_playlist_id
+    assert "nd5999" in env["nd"].playlists[pid]["songs"]
+
+
+async def test_playlist_failure_retries_without_another_download(env, monkeypatch) -> None:
+    from app.db import session_scope
+    from app.jobs import queue
+    from app.mixes import core
+    from app.models import DownloadItem, Job, MixSettings, utcnow
+
+    me = env["admin"]
+    await history(me)
+    fake_generators(monkeypatch, [new_track(5000 + i) for i in range(10)])
+    mix = await core.build_for(me)
+    item = next(r for r in await mix_rows(mix.id) if r.state == "active" and r.download_item_id)
+    tid = await add_track(5999, music=None)
+    async with session_scope() as s:
+        dl = await s.get(DownloadItem, item.download_item_id)
+        dl.status, dl.track_id = "done", tid
+        await core.enqueue_sync(s, mix.id, delay_s=0)
+    env["nd"].down = True
+    job = await queue._claim("sync")
+    await queue.run_job(job)
+    async with session_scope() as s:
+        failed = await s.get(Job, job.id)
+        assert failed.status == "queued" and failed.last_error
+        failed.run_after = utcnow()
+    env["nd"].down = False
+    retry = await queue._claim("sync")
+    assert retry.id == job.id
+    await queue.run_job(retry)
+    async with session_scope() as s:
+        assert (await s.get(Job, job.id)).status == "done"
+        pid = (await s.get(MixSettings, me)).nd_playlist_id
+    assert "nd5999" in env["nd"].playlists[pid]["songs"]
+
+
 async def test_next_mix_keeps_the_playlist_and_closes_the_old_one(env, monkeypatch) -> None:
     from app.db import session_scope
     from app.mixes import core

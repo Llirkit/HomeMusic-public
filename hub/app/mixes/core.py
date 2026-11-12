@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.catalog.models import CatalogTrack, split_ref
 from app.config import get_settings
 from app.db import session_scope
+from app.events import bus
 from app.jobs.queue import PRIORITY_IMPORT, enqueue, handler, notify
 from app.library.owned import ACTIVE_STATUSES, quiet
 from app.mixes import build as builder
@@ -47,7 +48,7 @@ log = logging.getLogger(__name__)
 
 PRIORITY_MIX = PRIORITY_IMPORT
 PLAYLIST_NAME = "Микс дня"
-SYNC_DELAY_S = 20  # downloads coming in one after another ask for one sync
+SYNC_DELAY_S = 1  # coalesce a burst without holding ready songs behind downloads
 CHECK_EVERY_S = 300
 LISTENED_S = 30
 FAILED = ("failed", "needs_review", "cancelled")
@@ -85,11 +86,14 @@ async def enqueue_build(s: AsyncSession, user_id: int, *, priority: int = PRIORI
 
 
 async def enqueue_sync(s: AsyncSession, mix_id: int, *, delay_s: float = SYNC_DELAY_S) -> None:
-    pending = (await s.execute(select(Job.id).where(
+    pending = (await s.execute(select(Job).where(
         Job.kind == "mix_sync", Job.status == "queued",
         func.json_extract(Job.payload_json, "$.mix_id") == mix_id).limit(1))).scalar_one_or_none()
     if pending is None:
-        await enqueue(s, "mix_sync", {"mix_id": mix_id}, delay_s=delay_s, priority=PRIORITY_MIX)
+        await enqueue(s, "mix_sync", {"mix_id": mix_id}, delay_s=delay_s, priority=0)
+    else:
+        pending.priority = 0
+        pending.run_after = min(pending.run_after, utcnow() + timedelta(seconds=delay_s))
 
 
 async def downloads_changed(s: AsyncSession, items: list[DownloadItem]) -> None:
@@ -163,7 +167,10 @@ async def build_for(user_id: int) -> Mix | None:
     async with session_scope() as s:
         mix = await save(s, user, built)
         mix_id = mix.id
-    await sync(mix_id)
+    if not await sync(mix_id):
+        async with session_scope() as s:
+            await enqueue_sync(s, mix_id, delay_s=5)
+        notify()
     await close_previous(user_id, mix_id)
     log.info("mix %s of user %s: %s songs, %s", mix_id, user_id, len(built.active), built.stats)
     async with session_scope() as s:
@@ -216,16 +223,18 @@ async def queue_download(s: AsyncSession, mix: Mix, it: MixItem) -> None:
 
 @handler("mix_sync")
 async def handle_sync(job: Job) -> None:
-    await sync(int(job.payload_json["mix_id"]))
+    if not await sync(int(job.payload_json["mix_id"])):
+        raise RuntimeError("Navidrome playlist update failed; retrying synchronization")
 
 
-async def sync(mix_id: int) -> None:
+async def sync(mix_id: int) -> bool:
     """Songs that downloaded get their library ids, failed ones give their place to the reserve, the library's
     lacking ones are downloaded; the playlist gets what is in the library, in the mix's order."""
     async with session_scope() as s:
         mix = await s.get(Mix, mix_id)
         if mix is None or mix.status != "active":
-            return
+            return True
+        playlist_synced = True
         items = list((await s.execute(select(MixItem).where(MixItem.mix_id == mix_id)
                                       .order_by(MixItem.position))).scalars())
         dl_ids = [i.download_item_id for i in items if i.download_item_id]
@@ -262,11 +271,15 @@ async def sync(mix_id: int) -> None:
             if pid:
                 settings.nd_playlist_id = mix.nd_playlist_id = pid
                 mix.stats_json = {**(mix.stats_json or {}), "playlist_songs": songs}
+            else:
+                playlist_synced = False
     # the light copies for a metered network (app.light), made now so a tap finds them ready
     from app import listen
 
     listen.warm_light([f"nd:{song}" for song in songs])
+    bus.publish(mix.user_id, "mix", {"mix_id": mix_id})
     notify()
+    return playlist_synced
 
 
 async def write_playlist(user: User, playlist_id: str | None, songs: list[str], mix: Mix) -> str | None:

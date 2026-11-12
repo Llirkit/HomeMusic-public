@@ -5,3 +5,5 @@ googlevideo.com
 ytimg.com
 youtubei.googleapis.com
 yt3.ggpht.com
+soundcloud.com
+sndcdn.com
