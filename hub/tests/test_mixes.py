@@ -600,7 +600,7 @@ async def test_today_settings_and_rebuild(env, monkeypatch) -> None:
     assert (await client.get("/api/mixes/today")).json()["building"] is True
 
 
-async def test_rebuild_is_for_the_admin_and_mixes_are_private(env, monkeypatch) -> None:
+async def test_users_rebuild_only_their_own_mix_and_admin_can_target_another_user(env, monkeypatch) -> None:
     from app.mixes import core
 
     other = await add_user("other")
@@ -609,10 +609,33 @@ async def test_rebuild_is_for_the_admin_and_mixes_are_private(env, monkeypatch) 
     mix = await core.build_for(other)
 
     async with app_client(env["app"], login=("other", "pw")) as c:
-        assert (await c.post("/api/mixes/rebuild", json={})).status_code == 403
+        r = await c.post("/api/mixes/rebuild", json={})
+        assert r.status_code == 200 and r.json() == {"queued": True}
+        assert (await c.post("/api/mixes/rebuild", json={"user_id": other})).json() == {"queued": False}
+        assert (await c.post("/api/mixes/rebuild", json={"user_id": env["admin"]})).status_code == 403
         assert (await c.get(f"/api/mixes/{mix.id}")).status_code == 200
+    async with app_client(env["app"], login=None) as c:
+        assert (await c.post("/api/mixes/rebuild", json={})).status_code == 401
     r = await env["client"].post("/api/mixes/rebuild", json={"user_id": other})  # the admin may
-    assert r.json() == {"queued": True}
+    assert r.json() == {"queued": False}
+
+
+async def test_simultaneous_manual_builds_are_deduplicated(env) -> None:
+    import asyncio
+
+    from app.db import session_scope
+    from app.mixes import core
+    from app.models import Job
+
+    async def request_build():
+        async with session_scope() as s:
+            return await core.enqueue_build(s, env["admin"], priority=0)
+
+    results = await asyncio.gather(*(request_build() for _ in range(8)))
+    assert results.count(True) == 1
+    async with session_scope() as s:
+        jobs = list((await s.execute(select(Job).where(Job.kind == "mix_build"))).scalars())
+        assert len(jobs) == 1 and jobs[0].max_attempts == 3 and jobs[0].status == "queued"
 
 
 async def test_onboarding_picks_artists_and_starts_a_build(env) -> None:

@@ -100,10 +100,10 @@ async def put_settings(body: MixSettingsIn, user: User = Depends(current_user),
 @router.post("/api/mixes/rebuild")
 async def rebuild(body: MixRebuildIn | None = None, user: User = Depends(current_user),
                   s: AsyncSession = Depends(get_session, scope="function")):
-    """Build the mix again now (admin, debugging): it replaces the current one when ready."""
-    if not user.is_admin:
-        raise HTTPException(403, "Только для администратора")
+    """Build one's own mix now; an admin may also request a build for another user."""
     user_id = (body.user_id if body else None) or user.id
+    if user_id != user.id and not user.is_admin:
+        raise HTTPException(403, "Можно собрать только свой микс")
     if await s.get(User, user_id) is None:
         raise HTTPException(404, "Пользователь не найден")
     queued = await core.enqueue_build(s, user_id, priority=0)

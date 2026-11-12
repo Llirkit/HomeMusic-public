@@ -3,7 +3,8 @@ import { expect, test } from '@playwright/test';
 // Real frontend interactions; network contracts are isolated from production Navidrome and paid APIs.
 async function backend(page, { authenticated = true } = {}) {
   const user = (name) => ({ id: name === 'alice' ? 1 : 2, username: name, is_admin: false, public_music_url: '', public_hub_url: '' });
-  const state = { me: authenticated ? user('alice') : null, holdReply: null, lastUpload: null };
+  const state = { me: authenticated ? user('alice') : null, holdReply: null, lastUpload: null, rebuildRequests: 0,
+    today: { mix: null, building: false, onboarding: false, settings: { mode: 'normal', mix_hour: 5, timezone: 'Asia/Tomsk', artists: [] } }, mixes: {} };
   const stats = { tracks: 2, owned: 0, to_download: 2, est_bytes: 1000, free_bytes: 1000000,
     pending: 2, exact: 0, probable: 0, not_found: 0, waiting: 0, downloading: 0, done: 0, failed: 0 };
   state.imp = { id: 71, source: 'text', method: 'file', status: 'preview', mode: 'economy', has_token: false,
@@ -42,7 +43,16 @@ async function backend(page, { authenticated = true } = {}) {
     if (path === '/api/imports') return json([]);
     if (path === '/api/nd/home') return json({ recent: [], frequent: [], newest: [], starred: [], radio: [] });
     if (path === '/api/starred') return json({ song_ids: [], album_ids: [], artist_ids: [], refs: [], subjects: [] });
-    if (path === '/api/mixes/today') return json({ mix: null, building: false, onboarding: false, settings: { mode: 'balanced', artists: [] } });
+    if (path === '/api/mixes/today') return state.failMixStatus ? json({ detail: 'Нет связи' }, 503) : json(state.today);
+    if (path === '/api/mixes/rebuild') {
+      state.rebuildRequests++;
+      state.lastMixRequest = request.postDataJSON();
+      if (state.failMixBuild) return json({ detail: 'Не удалось начать сборку' }, 503);
+      if (state.holdMixBuild) await state.holdMixBuild;
+      state.today = { ...state.today, building: true };
+      return json({ queued: true });
+    }
+    if (/^\/api\/mixes\/\d+$/.test(path)) return json(state.mixes[path.split('/').at(-1)] ?? { detail: 'Не найдено' }, state.mixes[path.split('/').at(-1)] ? 200 : 404);
     return json([]);
   });
   return state;
@@ -184,4 +194,79 @@ for (const format of ['TXT', 'CSV']) test(`${format} upload shows preview, requi
   await expect.poll(() => state.start).toMatchObject({ collection_ids: [72], mode: 'economy' });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(errors).toEqual([]);
+});
+
+const sampleMix = (id) => ({ id, title: `Микс ${id}`, description: 'Песни по вашему вкусу', mode: 'normal', mode_title: 'Обычный',
+  tracks: [], total: 0, ready: 0, created_at: '2026-11-12T12:00:00', status: 'active' });
+
+test('regular user starts the first daily mix now; loading blocks duplicate clicks and completed mix appears', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  const state = await backend(page);
+  let release;
+  state.holdMixBuild = new Promise((resolve) => { release = resolve; });
+  await page.clock.install();
+  await page.goto('/#/home');
+  const button = page.getByRole('button', { name: 'Собрать микс сейчас', exact: true });
+  await button.focus();
+  await expect(button).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('button', { name: 'Собирается…', exact: true })).toBeDisabled();
+  expect(state.rebuildRequests).toBe(1);
+  expect(state.lastMixRequest).toEqual({});
+  release();
+  await expect(page.getByRole('status').filter({ hasText: 'Собираем «Микс дня»' })).toBeVisible();
+  state.today = { ...state.today, building: false, mix: sampleMix(1) };
+  state.mixes[1] = state.today.mix;
+  await page.clock.fastForward(8500);
+  await expect(page.getByRole('link', { name: 'Микс дня: Микс 1' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Собрать заново', exact: true })).toBeEnabled();
+  await page.screenshot({ path: test.info().outputPath('manual-mix.png'), fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('mix card preserves current playback link and allows retry after request or build failure', async ({ page }) => {
+  const state = await backend(page);
+  state.today.mix = sampleMix(1);
+  state.mixes[1] = state.today.mix;
+  state.failMixBuild = true;
+  await page.clock.install();
+  await page.goto('/#/home');
+  await page.getByRole('button', { name: 'Собрать заново', exact: true }).click();
+  await expect(page.getByText('Не удалось начать сборку', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Собрать заново', exact: true })).toBeEnabled();
+  state.failMixBuild = false;
+  await page.getByRole('button', { name: 'Собрать заново', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Собираем новый микс' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Микс дня: Микс 1' })).toBeVisible();
+  state.today = { ...state.today, building: false };
+  await page.clock.fastForward(8500);
+  await expect(page.getByText('Новый микс не появился. Попробуйте собрать ещё раз.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Собрать заново', exact: true })).toBeEnabled();
+});
+
+test('new user is guided to pick artists before creating a mix', async ({ page }) => {
+  const state = await backend(page);
+  state.today.onboarding = true;
+  await page.goto('/#/home');
+  const setup = page.getByRole('link', { name: /Что вы слушаете/ });
+  await expect(setup).toHaveAttribute('href', '#/taste');
+  await expect(page.getByRole('button', { name: 'Собрать микс сейчас', exact: true })).toHaveCount(0);
+  expect(state.rebuildRequests).toBe(0);
+});
+
+test('regular user rebuilds from mix detail and reaches the new mix when it finishes', async ({ page }) => {
+  const state = await backend(page);
+  state.today.mix = sampleMix(1);
+  state.mixes[1] = state.today.mix;
+  state.mixes[2] = sampleMix(2);
+  await page.clock.install();
+  await page.goto('/#/mix/1');
+  await page.getByRole('button', { name: 'Собрать заново', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Собирается…', exact: true })).toBeDisabled();
+  state.today = { ...state.today, mix: state.mixes[2], building: false };
+  await page.clock.fastForward(4500);
+  await expect(page.getByRole('heading', { name: 'Микс 2', exact: true })).toBeVisible();
+  expect(state.rebuildRequests).toBe(1);
 });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, api } from '../api/client';
 import type { CatalogArtist, MixMode, MixOut, MixSettingsOut, MixTodayOut, MixTrackOut } from '../api/types';
 import { TrackRow, listenTrack } from '../components/catalog';
@@ -9,7 +9,6 @@ import { useAsync, useDebounced, useInterval } from '../lib/hooks';
 import { listen } from '../lib/listen';
 import { canPlay, canPlayAll, playList, playTracks } from '../lib/player';
 import { Link, goBack, navigate } from '../lib/router';
-import { useSession } from '../lib/session';
 import { attempt, toast } from '../lib/ui';
 
 /** «Микс дня» (MIXES.md 6.4): the card at the top of the catalog, the mix's page and «Что вы слушаете?» for a user
@@ -58,26 +57,66 @@ export function MixCover({ tracks, className, large }: { tracks: readonly MixTra
 /** Top of the catalog: today's mix, the build under way, or «Что вы слушаете?». */
 export function MixCard() {
   const res = useAsync((s) => api.mixToday(s), []);
+  const [submitting, setSubmitting] = useState(false);
+  const [waitingForMix, setWaitingForMix] = useState(false);
+  const previousMix = useRef<number | null>(null);
+  const requestPending = useRef(false);
   const today = res.data;
   useInterval(() => res.reload(true), today && (today.building || (today.mix && today.mix.ready < today.mix.total)) ? POLL_MS : null);
+  useEffect(() => {
+    if (!waitingForMix || !today || today.building) return;
+    setWaitingForMix(false);
+    toast(today.mix && today.mix.id !== previousMix.current ? 'Новый микс готов' : 'Новый микс не появился. Попробуйте собрать ещё раз.',
+      today.mix && today.mix.id !== previousMix.current ? 'success' : 'error');
+  }, [waitingForMix, today]);
+  const rebuild = async () => {
+    if (requestPending.current || today?.building) return;
+    requestPending.current = true;
+    setSubmitting(true);
+    try {
+      const result = await attempt(() => api.rebuildMix());
+      if (!result) return;
+      previousMix.current = today?.mix?.id ?? null;
+      res.setData((prev) => prev && { ...prev, building: true });
+      setWaitingForMix(true);
+      toast(result.queued ? 'Собираем ваш «Микс дня»' : 'Микс уже собирается', 'info');
+      res.reload(true);
+    } finally {
+      requestPending.current = false;
+      setSubmitting(false);
+    }
+  };
+  if (res.error && !today) return <div className="mx-4 mt-3"><ErrorState text="Не удалось загрузить «Микс дня»" onRetry={() => res.reload()} /></div>;
   if (!today) return null;
   const { mix, building, onboarding, settings } = today;
+  const buildButton = (
+    <Button small icon="refresh" busy={submitting || building} disabled={submitting || building} onClick={rebuild}>
+      {submitting || building ? 'Собирается…' : mix ? 'Собрать заново' : 'Собрать микс сейчас'}
+    </Button>
+  );
 
   if (mix)
     return (
-      <Link to={`/mix/${mix.id}`} className="mx-4 mt-3 flex items-center gap-3 rounded-xl bg-raised p-3 transition hover:bg-hover" aria-label={`Микс дня: ${mix.title}`}>
-        <MixCover tracks={mix.tracks} className="h-20 w-20" />
-        <div className="min-w-0 flex-1">
-          <div className="text-xs font-semibold uppercase tracking-wide text-accent">Микс дня</div>
-          <div className="line-clamp-2 font-bold leading-tight">{mix.title}</div>
-          <div className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-muted">{mix.description}</div>
-          <div className="mt-1 text-xs text-dim">
-            {songsWord(mix.total)}
-            {mix.ready < mix.total && ` · качается ${mix.total - mix.ready}`}
+      <div className="mx-4 mt-3 rounded-xl bg-raised">
+        <Link to={`/mix/${mix.id}`} className="flex items-center gap-3 rounded-xl p-3 transition hover:bg-hover" aria-label={`Микс дня: ${mix.title}`}>
+          <MixCover tracks={mix.tracks} className="h-20 w-20" />
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-semibold uppercase tracking-wide text-accent">Микс дня</div>
+            <div className="line-clamp-2 font-bold leading-tight">{mix.title}</div>
+            <div className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-muted">{mix.description}</div>
+            <div className="mt-1 text-xs text-dim">
+              {songsWord(mix.total)}
+              {mix.ready < mix.total && ` · качается ${mix.total - mix.ready}`}
+            </div>
           </div>
+          <Icon name="chevron" size={20} className="shrink-0 text-dim" />
+        </Link>
+        <div className="px-3 pb-3">
+          {buildButton}
+          {building && <p className="mt-2 text-xs text-muted" role="status">Собираем новый микс. Текущий можно слушать.</p>}
+          {res.error && <ErrorState text="Не удалось обновить статус микса" onRetry={() => res.reload(true)} />}
         </div>
-        <Icon name="chevron" size={20} className="shrink-0 text-dim" />
-      </Link>
+      </div>
     );
 
   if (building)
@@ -87,6 +126,7 @@ export function MixCard() {
         <div className="min-w-0">
           <div className="font-bold">Собираем «Микс дня»</div>
           <div className="text-[13px] text-muted">Подбираем 50 песен по вашему вкусу — это займёт пару минут</div>
+          {res.error && <ErrorState text="Не удалось обновить статус микса" onRetry={() => res.reload(true)} />}
         </div>
       </div>
     );
@@ -106,25 +146,29 @@ export function MixCard() {
     );
 
   return (
-    <div className="mx-4 mt-3 flex items-center gap-3 rounded-xl bg-raised p-4">
-      <Icon name="sparkle" size={24} className="shrink-0 text-accent" />
-      <div className="min-w-0 text-[13px] text-muted">
-        <span className="font-semibold text-fg">«Микс дня»</span> появится в {settings.mix_hour}:00
+    <div className="mx-4 mt-3 space-y-3 rounded-xl bg-raised p-4">
+      <div className="flex items-center gap-3">
+        <Icon name="sparkle" size={24} className="shrink-0 text-accent" />
+        <div className="min-w-0 text-[13px] text-muted">
+          <span className="font-semibold text-fg">«Микс дня»</span> появится в {settings.mix_hour}:00
+        </div>
       </div>
+      {buildButton}
     </div>
   );
 }
 
 export function MixPage({ id }: { id: number }) {
-  const { me } = useSession();
   // an unknown mix (an old link) is null: the page goes to today's
   const res = useAsync((s) => Promise.all([api.mix(id, s).catch((e) => (e instanceof ApiError && e.status === 404 ? null : Promise.reject(e))), api.mixToday(s)]), [id]);
   const [rebuilding, setRebuilding] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const requestPending = useRef(false);
   const [modeBusy, setModeBusy] = useState(false);
   const mix: MixOut | null | undefined = res.data?.[0];
   const today: MixTodayOut | undefined = res.data?.[1];
   const settings = today?.settings;
-  const building = rebuilding || !!today?.building;
+  const building = submitting || !!today?.building;
   const current = !!today?.mix && today.mix.id === id;
 
   useInterval(() => res.reload(true), mix && (building || mix.ready < mix.total) ? (building ? BUILD_POLL_MS : POLL_MS) : null);
@@ -133,8 +177,12 @@ export function MixPage({ id }: { id: number }) {
   }, [res.data, today]);
   // a new mix replaced this one: go there
   useEffect(() => {
-    if (!rebuilding || !today?.mix || today.mix.id === id) return;
+    if (!rebuilding || !today || today.building) return;
     setRebuilding(false);
+    if (!today.mix || today.mix.id === id) {
+      toast('Новый микс не появился. Попробуйте собрать ещё раз.', 'error');
+      return;
+    }
     toast('Новый микс готов', 'success');
     navigate(`/mix/${today.mix.id}`, { replace: true });
   }, [rebuilding, today, id]);
@@ -173,15 +221,24 @@ export function MixPage({ id }: { id: number }) {
     setModeBusy(false);
     if (!st) return;
     res.setData((prev) => (prev ? [prev[0], { ...prev[1], settings: st }] : prev));
-    toast(me.is_admin ? 'Режим сменится в следующем миксе — или соберите заново сейчас' : `Режим сменится в следующем миксе, в ${st.mix_hour}:00`, 'success');
+    toast('Режим сменится в следующем миксе — или соберите заново сейчас', 'success');
   };
 
   const rebuild = async () => {
-    const r = await attempt(() => api.rebuildMix());
-    if (!r) return;
-    setRebuilding(true);
-    toast(r.queued ? 'Собираем новый микс — пара минут' : 'Микс уже собирается', 'info');
-    res.reload(true);
+    if (requestPending.current || building) return;
+    requestPending.current = true;
+    setSubmitting(true);
+    try {
+      const r = await attempt(() => api.rebuildMix());
+      if (!r) return;
+      res.setData((prev) => prev ? [prev[0], { ...prev[1], building: true }] : prev);
+      setRebuilding(true);
+      toast(r.queued ? 'Собираем новый микс — пара минут' : 'Микс уже собирается', 'info');
+      res.reload(true);
+    } finally {
+      requestPending.current = false;
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -215,7 +272,8 @@ export function MixPage({ id }: { id: number }) {
 
       <div className="px-4 pb-2">{playAll && <Button variant="primary" icon="play" block onClick={playAll}>Слушать всё</Button>}</div>
 
-      {current && <MixModes settings={settings} busy={modeBusy} building={building} isAdmin={me.is_admin} onMode={setMode} onRebuild={rebuild} />}
+      {current && <MixModes settings={settings} busy={modeBusy} building={building} onMode={setMode} onRebuild={rebuild} />}
+      {res.error && <ErrorState text="Не удалось обновить статус микса" onRetry={() => res.reload(true)} />}
 
       <section aria-label="Песни микса" className="pt-2">
         {tracks.map((t) => (
@@ -231,14 +289,12 @@ function MixModes({
   settings,
   busy,
   building,
-  isAdmin,
   onMode,
   onRebuild,
 }: {
   settings: MixSettingsOut;
   busy: boolean;
   building: boolean;
-  isAdmin: boolean;
   onMode: (m: MixMode) => void;
   onRebuild: () => void;
 }) {
@@ -253,11 +309,9 @@ function MixModes({
       <p className="mt-2 text-[13px] text-muted">
         {hint}. Новый микс — каждый день в {settings.mix_hour}:00.
       </p>
-      {isAdmin && (
-        <Button small icon="refresh" className="mt-3" busy={building} onClick={onRebuild}>
-          {building ? 'Собирается…' : 'Собрать заново'}
-        </Button>
-      )}
+      <Button small icon="refresh" className="mt-3" busy={building} disabled={building} onClick={onRebuild}>
+        {building ? 'Собирается…' : 'Собрать заново'}
+      </Button>
     </section>
   );
 }
