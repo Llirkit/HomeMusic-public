@@ -789,7 +789,7 @@ export interface ImportCollectionOut {
 
 export interface ImportOut {
   id: number;
-  source: 'yandex' | 'spotify';
+  source: 'yandex' | 'spotify' | 'text';
   method: ImportMethod;
   status: ImportStatus | string;
   mode: ImportMode;

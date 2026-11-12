@@ -238,6 +238,62 @@ async def test_spotify_export_preview_and_economy_import_preserve_playlist_order
     assert (await client.post(f"/api/imports/{imp['id']}/sync")).status_code == 409
 
 
+async def test_text_preview_confirm_order_and_no_shared_mapping(env):
+    from app.db import session_scope
+    from app.models import SourceMap
+
+    c = env["client"]
+    response = await c.post("/api/imports/text", params={"filename": "Дорога.txt"},
+                            content="ДДТ — Осень\nАквариум — Город золотой\nКино — Группа крови\nДДТ — Осень".encode())
+    assert response.status_code == 200, response.text
+    imp = response.json()
+    assert (imp["source"], imp["method"], imp["status"]) == ("text", "file", "preview")
+    assert imp["stats"]["tracks"] == 3 and imp["stats"]["owned"] == 2
+    assert not await jobs("import_resolve")  # No matching/downloads before explicit confirmation.
+    assert (await c.post(f"/api/imports/{imp['id']}/start", json={
+        "mode": "economy", "collection_ids": [imp["collections"][0]["id"]]})).status_code == 200
+    await run_imports()
+    assert any(p["name"] == "Дорога" and p["songs"] == ["ndB", "ndA"] for p in env["state"]["playlists"].values())
+    rows = (await c.get(f"/api/imports/{imp['id']}/items")).json()["items"]
+    assert [r["title"] for r in rows] == ["Осень", "Город золотой", "Группа крови"]
+    assert rows[2]["ref"] == "dz:100" and rows[2]["status"] == "waiting"
+    async with session_scope() as s:
+        assert not list((await s.execute(select(SourceMap).where(SourceMap.source == "text"))).scalars())
+    assert (await c.post(f"/api/imports/{imp['id']}/sync")).status_code == 409
+
+
+async def test_text_title_only_does_not_guess_ambiguous_recordings(env, monkeypatch):
+    from app.catalog.models import SearchResults
+    from app.db import session_scope
+    from app.imports.resolve import resolve_track
+    from app.services import svc
+
+    song = svc.deezer.track
+    options = [song]
+
+    async def search(*args, **kwargs):
+        return SearchResults(tracks=options)
+
+    monkeypatch.setattr(svc.deezer, "search", search)
+    async with session_scope() as s:
+        r = await resolve_track(s, "text", "one", {"title": song.title})
+        assert (r.match, r.ref) == ("probable", song.ref)
+        options.append(song.model_copy(update={"ref": "dz:999", "artist": "Другой исполнитель", "isrc": "OTHER"}))
+        assert (await resolve_track(s, "text", "one", {"title": song.title})).match == "not_found"
+        options[:] = [song.model_copy(update={"title": song.title + " (Live)"})]
+        assert (await resolve_track(s, "text", "one", {"title": song.title})).match == "not_found"
+
+
+async def test_text_upload_validation_and_auth(env):
+    c = env["client"]
+    for data, name, status in [(b"", "empty.txt", 400), (b"x" * (1024 * 1024 + 1), "large.txt", 413),
+                               (b"Artist - Song", "tracks.json", 400)]:
+        r = await c.post("/api/imports/text", params={"filename": name}, content=data)
+        assert r.status_code == status, r.text
+    await c.post("/api/auth/logout")
+    assert (await c.post("/api/imports/text", content=b"Artist - Song")).status_code == 401
+
+
 async def test_preview_counts_what_the_library_has(env):
     c = env["client"]
     imp = await prepared(c)

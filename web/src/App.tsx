@@ -24,6 +24,7 @@ import { AlbumPage } from './pages/Album';
 import { ArtistPage } from './pages/Artist';
 import { AssistantChatsPage, AssistantPage } from './pages/Assistant';
 import { AssistantTaskPage } from './pages/AssistantTask';
+import { setAssistantAccount } from './pages/AssistantChat';
 import { DownloadDetailPage } from './pages/DownloadDetail';
 import { DownloadsPage } from './pages/Downloads';
 import { HomePage } from './pages/Home';
@@ -115,16 +116,21 @@ export function App() {
   const [bootError, setBootError] = useState<string>();
   const route = useRoute();
 
+  const updateSession = useCallback((next: MeOut | null) => {
+    setAssistantAccount(next?.id ?? null);
+    setMe(next);
+  }, []);
+
   const boot = useCallback(() => {
     setBootError(undefined);
     api
       .me()
-      .then(setMe)
+      .then(updateSession)
       .catch((e) => {
-        if (e instanceof ApiError && e.status === 401) setMe(null);
+        if (e instanceof ApiError && e.status === 401) updateSession(null);
         else setBootError(errorMessage(e));
       });
-  }, []);
+  }, [updateSession]);
 
   useEffect(boot, [boot]);
 
@@ -138,11 +144,11 @@ export function App() {
   useEffect(() => {
     const onUnauthorized = () => {
       invalidateCache();
-      setMe(null);
+      updateSession(null);
     };
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
-  }, []);
+  }, [updateSession]);
 
   useEffect(() => {
     if (!me) return;
@@ -163,6 +169,7 @@ export function App() {
   }, [me, resolved]);
 
   const logout = useCallback(async () => {
+    setAssistantAccount(null);
     try {
       await api.logout();
     } catch {
@@ -171,9 +178,9 @@ export function App() {
     invalidateCache();
     stopListening();
     resetStars();
-    setMe(null);
+    updateSession(null);
     navigate(START, { replace: true });
-  }, []);
+  }, [updateSession]);
 
   if (me === undefined) {
     return (
@@ -194,7 +201,7 @@ export function App() {
   if (me === null) {
     return (
       <>
-        <LoginPage onLogin={setMe} />
+        <LoginPage onLogin={updateSession} />
         <Overlays />
       </>
     );

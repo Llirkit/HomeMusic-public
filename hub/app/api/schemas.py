@@ -637,7 +637,7 @@ class AssistantTextIn(BaseModel):
 
 # --- imports from music services ----------------------------------------------------------
 
-ImportSource = Literal["yandex", "spotify"]
+ImportSource = Literal["yandex", "spotify", "text"]
 ImportMethod = Literal["device", "token", "profile", "file"]  # file: a Spotify export (POST /api/imports/spotify)
 ImportMode = Literal["economy", "full"]
 

@@ -133,6 +133,7 @@ export function withQuery(path: string, query?: Query): string {
 interface RequestOpts {
   json?: unknown;
   form?: FormData;
+  file?: Blob;
   signal?: AbortSignal;
 }
 
@@ -144,6 +145,9 @@ export async function request<T>(method: string, path: string, opts: RequestOpts
     body = JSON.stringify(opts.json);
   } else if (opts.form) {
     body = opts.form;
+  } else if (opts.file) {
+    headers['Content-Type'] = 'application/octet-stream';
+    body = opts.file;
   }
   let res: Response;
   try {
@@ -373,6 +377,7 @@ export const api = {
     for (const file of files) form.append('files', file);
     return request<ImportOut>('POST', '/api/imports/spotify', { form });
   },
+  importText: (file: File) => request<ImportOut>('POST', withQuery('/api/imports/text', { filename: file.name }), { file }),
   importGet: (id: number, signal?: AbortSignal) => request<ImportOut>('GET', `/api/imports/${id}`, { signal }),
   importItems: (id: number, q: { collection_id?: number; status?: string; match?: string; offset?: number; limit?: number }, signal?: AbortSignal) =>
     request<ImportItemsOut>('GET', withQuery(`/api/imports/${id}/items`, q), { signal }),
@@ -398,10 +403,10 @@ export const api = {
     images.forEach((img, i) => form.append('images', img, img instanceof File ? img.name : `screenshot-${i + 1}.png`));
     return request<ChatOut>('POST', '/api/assistant/chat', { form, signal });
   },
-  chatConfirm: (taskId: number, confirm_token: string, chatId: number | null) =>
-    request<ChatConfirmOut>('POST', `/api/assistant/chat/${taskId}/confirm`, { json: { confirm_token, chat_id: chatId } }),
-  chatDismiss: (taskId: number, chatId: number | null) =>
-    request<OkOut>('POST', `/api/assistant/chat/${taskId}/dismiss`, { json: { chat_id: chatId } }),
+  chatConfirm: (taskId: number, confirm_token: string, chatId: number | null, signal?: AbortSignal) =>
+    request<ChatConfirmOut>('POST', `/api/assistant/chat/${taskId}/confirm`, { json: { confirm_token, chat_id: chatId }, signal }),
+  chatDismiss: (taskId: number, chatId: number | null, signal?: AbortSignal) =>
+    request<OkOut>('POST', `/api/assistant/chat/${taskId}/dismiss`, { json: { chat_id: chatId }, signal }),
   chats: (signal?: AbortSignal) => request<ChatBriefOut[]>('GET', '/api/assistant/chats', { signal }),
   savedChat: (id: number, signal?: AbortSignal) => request<ChatSavedOut>('GET', `/api/assistant/chats/${id}`, { signal }),
   deleteChat: (id: number) => request<OkOut>('DELETE', `/api/assistant/chats/${id}`),

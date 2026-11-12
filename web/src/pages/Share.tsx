@@ -3,13 +3,10 @@ import { Button, Empty, PageHeader, Spinner } from '../components/ui';
 import { navigate } from '../lib/router';
 import { clearShare, readShare } from '../lib/shareStore';
 import { toast } from '../lib/ui';
-import { startChatWith } from './AssistantChat';
+import { assistantAccountVersion, startChatWith } from './AssistantChat';
 import { isAudioFile, queueFilesForUpload } from './Upload';
 
 type Phase = { kind: 'working'; text: string } | { kind: 'empty' } | { kind: 'error'; text: string };
-
-// Guards against double processing (StrictMode effects, re-renders).
-let running: Promise<void> | null = null;
 
 /**
  * Android "Share" → HomeMusic. The service worker stored the shared payload in IndexedDB and redirected here:
@@ -19,19 +16,23 @@ export function SharePage() {
   const [phase, setPhase] = useState<Phase>({ kind: 'working', text: 'Открываю то, чем вы поделились…' });
 
   useEffect(() => {
-    if (running) return;
-    running = (async () => {
+    let active = true;
+    const version = assistantAccountVersion();
+    const current = () => active && version === assistantAccountVersion();
+    void (async () => {
       let payload;
       try {
         payload = await readShare();
       } catch {
         payload = null;
       }
+      if (!current()) return;
       if (!payload) {
         setPhase({ kind: 'empty' });
         return;
       }
       await clearShare().catch(() => undefined);
+      if (!current()) return;
 
       const images = payload.files.filter((f) => f.type.startsWith('image/'));
       const audio = payload.files.filter((f) => !f.type.startsWith('image/') && isAudioFile(f));
@@ -51,9 +52,8 @@ export function SharePage() {
         return;
       }
       setPhase({ kind: 'error', text: 'Этот тип файлов не поддерживается. Поделитесь скриншотом, аудиофайлом или ссылкой.' });
-    })().finally(() => {
-      running = null;
-    });
+    })();
+    return () => { active = false; };
   }, []);
 
   return (

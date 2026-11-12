@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.catalog.models import make_ref, split_ref
 from app.config import get_settings
 from app.library.owned import find_existing
-from app.matching.normalize import normalize_artist, split_version, version_kind
+from app.matching.normalize import normalize_artist, normalize_title, split_version, version_kind
 from app.matching.score import score
 from app.matching.select import classify_scores, match_catalog, rank_candidates
 from app.models import SourceMap, Track, utcnow
@@ -110,8 +110,35 @@ async def catalog_track(raw: dict[str, Any]) -> Resolution:
     return Resolution("not_found", None, round(best[0][1].total, 3) if best else None)
 
 
+async def _title_only_track(raw: dict[str, Any]) -> Resolution:
+    """Use a title only when exact full-title results identify one artist, without guessing."""
+    if svc.deezer is None:
+        raise CatalogDown("Каталог недоступен")
+    try:
+        found = await svc.deezer.search(raw["title"], kinds=("track",), limit=10)
+    except Exception as e:
+        raise CatalogDown(repr(e)) from e
+    # Keep version names: a live/remix must not silently replace the requested recording.
+    want = " ".join(raw["title"].casefold().split())
+    matches = [t for t in found.tracks if " ".join(t.title.casefold().split()) == want]
+    identities = {(normalize_artist(t.artist).text, normalize_title(t.title).text) for t in matches}
+    if len(identities) != 1 or len(found.tracks) >= 10:
+        return Resolution("not_found")
+    if len(matches) > 1 and (not matches[0].isrc or any(t.isrc != matches[0].isrc for t in matches)):
+        return Resolution("not_found")
+    return Resolution("probable", matches[0].ref)
+
+
 async def resolve_track(s: AsyncSession, source: str, external_id: str, raw: dict[str, Any]) -> Resolution:
     lib = await _owned(s, raw)
+    if source == "text":
+        # A content hash is not an authoritative service ID. Never share these assertions via SourceMap.
+        if lib is not None:
+            return Resolution("owned", track=lib, score=1.0)
+        r = await catalog_track(raw) if raw.get("artist") else await _title_only_track(raw)
+        if r.ref and (lib := await _owned(s, raw, r.ref)) is not None:
+            return Resolution("owned", r.ref, 1.0, lib)
+        return r
     known = await _remembered(s, source, "track", external_id)
     if lib is not None:
         return Resolution("owned", known.ref if known else None, 1.0, lib)

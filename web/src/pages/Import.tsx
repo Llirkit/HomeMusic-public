@@ -51,7 +51,7 @@ function statusLine(imp: ImportOut): string {
 }
 
 function sourceTitle(imp: ImportOut): string {
-  const name = imp.source === 'spotify' ? 'Spotify' : 'Яндекс Музыка';
+  const name = imp.source === 'text' ? 'Текстовый список' : imp.source === 'spotify' ? 'Spotify' : 'Яндекс Музыка';
   return `${name}${imp.account ? ` · ${imp.account}` : ''}`;
 }
 
@@ -60,10 +60,11 @@ function sourceTitle(imp: ImportOut): string {
 export function ImportsPage() {
   const res = useAsync((s) => api.imports(s), []);
   useHubEvent('import', () => res.reload(true));
-  const [busy, setBusy] = useState<'device' | 'profile' | 'token' | 'spotify' | null>(null);
+  const [busy, setBusy] = useState<'device' | 'profile' | 'token' | 'spotify' | 'text' | null>(null);
   const [profile, setProfile] = useState('');
   const [token, setToken] = useState('');
   const spotifyFile = useRef<HTMLInputElement>(null);
+  const textFile = useRef<HTMLInputElement>(null);
 
   const start = async (method: 'device' | 'profile' | 'token') => {
     setBusy(method);
@@ -78,6 +79,15 @@ export function ImportsPage() {
     if (!files.length) return;
     setBusy('spotify');
     const result = await attempt(() => api.importSpotify(files));
+    setBusy(null);
+    if (result) navigate(`/import/${result.id}`);
+  };
+
+  const uploadText = async (file?: File) => {
+    if (!file) return;
+    if (file.size > 1024 * 1024) { toast('Текстовый файл превышает 1 МБ', 'error'); return; }
+    setBusy('text');
+    const result = await attempt(() => api.importText(file));
     setBusy(null);
     if (result) navigate(`/import/${result.id}`);
   };
@@ -105,6 +115,20 @@ export function ImportsPage() {
           ))}
         </ul>
       ) : null}
+
+      <SectionTitle>Из текстового файла</SectionTitle>
+      <div className="card mx-4 space-y-3 p-4">
+        <p className="text-sm text-muted">Список из Яндекс Музыки, Spotify или другого сервиса: одна песня на строку.</p>
+        <p id="text-import-help" className="text-xs text-dim">Файл TXT до 1 МБ, до 10 000 строк. Формат: Исполнитель — Название. Можно только названия; неоднозначные совпадения останутся для ручной проверки. Повторы убираются, порядок сохраняется.</p>
+        <input ref={textFile} type="file" accept=".txt,text/plain" aria-label="Текстовый список песен" aria-describedby="text-import-help" hidden onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = '';
+          void uploadText(file);
+        }} />
+        <Button variant="primary" block icon="upload" busy={busy === 'text'} disabled={!!busy}
+          onClick={() => textFile.current?.click()}>Загрузить список TXT</Button>
+        <p className="text-xs text-dim">Сначала покажем список для подтверждения. Имя файла станет названием плейлиста.</p>
+      </div>
 
       <SectionTitle>Из Яндекс Музыки</SectionTitle>
       <div className="card mx-4 space-y-3 p-4">
@@ -301,7 +325,7 @@ function Preview({ imp, onStarted }: { imp: ImportOut; onStarted: (r: ImportOut)
             Скачивать любимые альбомы целиком
           </label>
         )}
-        {imp.method !== 'profile' && (
+        {imp.method !== 'profile' && imp.method !== 'file' && (
           <label className="flex items-center gap-1 text-sm">
             <Checkbox checked={keep} onChange={setKeep} label="Запомнить вход" />
             <span className="min-w-0">Запомнить вход, чтобы потом подтянуть новое</span>

@@ -3,13 +3,13 @@
 // The Hub saves every turn into a chat (`/api/assistant/chats`): the open chat lives in the route (`?chat=<id>`)
 // and in a store here, so a reply that comes after leaving the screen is not lost.
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { api, errorMessage } from '../api/client';
+import { api, errorMessage, isAbort } from '../api/client';
 import type { ChatAction, ChatMessage, SavedChatMessage } from '../api/types';
 import { Icon } from '../components/Icon';
 import { Button, ErrorState, IconButton, Loading, Spinner, cx } from '../components/ui';
 import { tracksWord } from '../lib/format';
 import { navigate, parseHash } from '../lib/router';
-import { attempt, toast } from '../lib/ui';
+import { toast } from '../lib/ui';
 
 const MAX_IMAGES = 15;
 const MAX_MESSAGE_CHARS = 5000;
@@ -51,11 +51,14 @@ interface ChatState {
 }
 
 const CURRENT_KEY = 'hm.chat.current';
+let account: number | null = null;
+let accountVersion = 0;
 let state: ChatState = { id: null, entries: [], loading: false, sending: false };
 // bumps when another chat opens: a reply to the previous one then only stays on the Hub
 let gen = 0;
 let seq = 0;
 const listeners = new Set<() => void>();
+const requests = new Set<AbortController>();
 
 function update(patch: Partial<ChatState> | ((s: ChatState) => Partial<ChatState>)) {
   state = { ...state, ...(typeof patch === 'function' ? patch(state) : patch) };
@@ -64,8 +67,11 @@ function update(patch: Partial<ChatState> | ((s: ChatState) => Partial<ChatState
 
 function remember(id: number | null) {
   try {
-    if (id) sessionStorage.setItem(CURRENT_KEY, String(id));
-    else sessionStorage.removeItem(CURRENT_KEY);
+    sessionStorage.removeItem(CURRENT_KEY); // Legacy pointers have no known owner.
+    if (account === null) return;
+    const key = `${CURRENT_KEY}.${account}`;
+    if (id) sessionStorage.setItem(key, String(id));
+    else sessionStorage.removeItem(key);
   } catch {
     /* storage unavailable: the route still holds the chat */
   }
@@ -73,9 +79,10 @@ function remember(id: number | null) {
 
 /** The chat open last in this tab (the assistant's tab returns to it). */
 export function currentChatId(): number | null {
+  if (account === null) return null;
   if (state.id) return state.id;
   try {
-    return Number(sessionStorage.getItem(CURRENT_KEY)) || null;
+    return Number(sessionStorage.getItem(`${CURRENT_KEY}.${account}`)) || null;
   } catch {
     return null;
   }
@@ -98,22 +105,39 @@ const fromSaved = (m: SavedChatMessage): Entry => ({
 });
 
 function openChat(id: number) {
+  if (account === null) return;
   if (state.id === id && !state.error) return;
   const g = ++gen;
   remember(id);
   update({ id, entries: [], loading: true, error: undefined, sending: false });
-  api.savedChat(id).then(
+  const ctl = new AbortController();
+  requests.add(ctl);
+  api.savedChat(id, ctl.signal).then(
     (c) => g === gen && update({ entries: c.messages.map(fromSaved), loading: false }),
     (e) => g === gen && update({ loading: false, error: errorMessage(e) }),
-  );
+  ).finally(() => requests.delete(ctl));
 }
 
 /** Starts a new chat; the previous one stays in the history. */
 export function newChat() {
   gen++;
+  state.entries.forEach((e) => e.images?.forEach((url) => URL.revokeObjectURL(url)));
+  draft = null;
   remember(null);
   update({ id: null, entries: [], loading: false, error: undefined, sending: false });
 }
+
+/** Called synchronously before exposing a new login state to authenticated screens. */
+export function setAssistantAccount(next: number | null) {
+  if (account === next) return;
+  newChat(); // Invalidate outstanding replies and forget the old account's private state.
+  requests.forEach((ctl) => ctl.abort());
+  requests.clear();
+  account = next;
+  accountVersion++;
+}
+
+export const assistantAccountVersion = () => accountVersion;
 
 /** Forgets a chat deleted from the history if it is the open one. */
 export function forgetChat(id: number) {
@@ -124,6 +148,7 @@ let draft: { text: string; images: File[] } | null = null;
 
 /** Opens a new chat with a message ready to send (Android "Share" → HomeMusic). */
 export function startChatWith(text: string, images: File[] = []) {
+  if (account === null) return;
   newChat();
   draft = { text, images: images.slice(0, MAX_IMAGES) };
   if (images.length > MAX_IMAGES) imageLimitWarning();
@@ -155,13 +180,16 @@ const historyContent = (e: Entry) => (e.done?.length ? `${e.content}
 const shotsWord = (n: number) => (n === 1 ? 'Скриншот' : `Скриншоты: ${n}`);
 
 async function send(content: string, attached: File[]) {
+  if (account === null) return;
   const g = gen;
+  const ctl = new AbortController();
+  requests.add(ctl);
   const imageUrls = attached.map((f) => URL.createObjectURL(f));
   const user: Entry = { id: ++seq, role: 'user', content, images: imageUrls };
   const history: ChatMessage[] = [...state.entries.filter((e) => !e.error), user].map((e) => ({ role: e.role, content: historyContent(e) }));
   update((s) => ({ entries: [...s.entries, user], sending: true }));
   try {
-    const r = await api.chat(history, state.id, attached);
+    const r = await api.chat(history, state.id, attached, ctl.signal);
     if (g !== gen) return;
     if (!state.id) {
       remember(r.chat_id);
@@ -178,6 +206,7 @@ async function send(content: string, attached: File[]) {
   } catch (e) {
     if (g === gen) update((s) => ({ entries: [...s.entries, { id: ++seq, role: 'assistant', content: errorMessage(e), error: true }] }));
   } finally {
+    requests.delete(ctl);
     if (g === gen) update({ sending: false });
   }
 }
@@ -246,15 +275,26 @@ export function AssistantChat({ chatId }: { chatId: number | null }) {
 
   const confirm = async (e: Entry) => {
     if (!e.proposal) return;
+    const g = gen;
     setProposal(e.id, 'busy');
-    const r = await attempt(() => api.chatConfirm(e.proposal!.taskId, e.proposal!.token, id), 'Готово');
-    setProposal(e.id, r ? 'confirmed' : 'pending');
+    const ctl = new AbortController();
+    requests.add(ctl);
+    try {
+      await api.chatConfirm(e.proposal.taskId, e.proposal.token, id, ctl.signal);
+      if (g === gen) { setProposal(e.id, 'confirmed'); toast('Готово', 'success'); }
+    } catch (error) {
+      if (g === gen && !isAbort(error)) { setProposal(e.id, 'pending'); toast(errorMessage(error), 'error'); }
+    } finally {
+      requests.delete(ctl);
+    }
   };
 
   const dismiss = (e: Entry) => {
     if (!e.proposal) return;
     setProposal(e.id, 'dismissed');
-    void api.chatDismiss(e.proposal.taskId, id).catch(() => undefined);
+    const ctl = new AbortController();
+    requests.add(ctl);
+    void api.chatDismiss(e.proposal.taskId, id, ctl.signal).catch(() => undefined).finally(() => requests.delete(ctl));
   };
 
   const totalCost = entries.reduce((s, e) => s + (e.cost ?? 0), 0);

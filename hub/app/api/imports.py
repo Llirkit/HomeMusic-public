@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,7 +10,7 @@ from app.api.schemas import ImportIn, ImportItemsOut, ImportOut, ImportPickOut, 
 from app.auth import current_user
 from app.db import get_session
 from app.imports import apply, core
-from app.imports.sources import spotify
+from app.imports.sources import spotify, text
 from app.imports.sources.base import SourceError
 from app.jobs.queue import PRIORITY_IMPORT, PermanentError, enqueue, notify
 from app.models import DownloadItem, Import, ImportCollection, ImportItem, Track, User
@@ -63,6 +63,29 @@ async def import_spotify(files: list[UploadFile] = File(), user: User = Depends(
     except SourceError as e:
         raise HTTPException(400, str(e)) from e
     imp = Import(user_id=user.id, source="spotify", method="file", status="preview")
+    s.add(imp)
+    await s.flush()
+    await core.store_snapshot(s, imp, snapshot)
+    return await core.import_out(s, imp)
+
+
+@router.post("/text", response_model=ImportOut)
+async def import_text(request: Request, user: User = Depends(current_user),
+                      filename: str = Query("Импорт.txt", max_length=255),
+                      s: AsyncSession = Depends(get_session, scope="function")):
+    # Raw file bytes avoid spooling an unbounded multipart upload before its size check.
+    if not filename.lower().endswith(".txt"):
+        raise HTTPException(400, "Нужен файл TXT: одна песня на строку")
+    data = bytearray()
+    async for chunk in request.stream():
+        if len(data) + len(chunk) > text.MAX_BYTES:
+            raise HTTPException(413, "Текстовый файл превышает 1 МБ")
+        data.extend(chunk)
+    try:
+        snapshot = text.parse(bytes(data), filename)
+    except SourceError as e:
+        raise HTTPException(400, str(e)) from e
+    imp = Import(user_id=user.id, source="text", method="file", status="preview")
     s.add(imp)
     await s.flush()
     await core.store_snapshot(s, imp, snapshot)
@@ -145,7 +168,7 @@ async def sync(import_id: int, user: User = Depends(current_user),
     if imp.started_at is None:
         raise HTTPException(409, "Импорт ещё не запущен")
     if imp.method == "file":
-        raise HTTPException(409, "Загрузите новый экспорт Spotify")
+        raise HTTPException(409, "Загрузите новый текстовый список" if imp.source == "text" else "Загрузите новый экспорт Spotify")
     if imp.method != "profile" and not imp.token_enc:
         raise HTTPException(409, "Вход в сервис удалён — начните новый перенос")
     imp.status = "fetching"
