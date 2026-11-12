@@ -20,6 +20,13 @@ gpu = [
     "muq==0.1.0",
     "transformers>=4.46,<5",
 ]
+cpu = [
+    "torch==2.11.0",
+    "torchaudio==2.11.0",
+    "torchvision==0.26.0",
+    "muq==0.1.0",
+    "transformers>=4.46,<5",
+]
 
 [dependency-groups]
 dev = [
@@ -33,16 +40,22 @@ dev = [
 [tool.uv]
 # the image is Linux; no need to resolve Windows/macOS wheels of torch
 environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+conflicts = [[{extra = "cpu"}, {extra = "gpu"}]]
 
 # PyTorch with CUDA 12.8: the first build with Blackwell (sm_120, RTX 50xx) kernels.
 [tool.uv.sources]
-torch = { index = "pytorch-cu128" }
-torchaudio = { index = "pytorch-cu128" }
-torchvision = { index = "pytorch-cu128" }
+torch = [{ index = "pytorch-cu128", extra = "gpu" }, { index = "pytorch-cpu", extra = "cpu" }]
+torchaudio = [{ index = "pytorch-cu128", extra = "gpu" }, { index = "pytorch-cpu", extra = "cpu" }]
+torchvision = [{ index = "pytorch-cu128", extra = "gpu" }, { index = "pytorch-cpu", extra = "cpu" }]
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [tool.pytest.ini_options]

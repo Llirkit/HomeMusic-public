@@ -11,9 +11,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certi
     && rm -rf /var/lib/apt/lists/*
 COPY --from=ghcr.io/astral-sh/uv:0.10.8 /uv /usr/local/bin/uv
 WORKDIR /app
+ARG MODEL_EXTRA=gpu
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --extra gpu --no-install-project
+RUN uv sync --frozen --no-dev --extra ${MODEL_EXTRA} --no-install-project
 COPY . ./
-RUN rm -rf /app/.venv && uv sync --frozen --no-dev --extra gpu
+RUN rm -rf /app/.venv && uv sync --frozen --no-dev --extra ${MODEL_EXTRA}
 EXPOSE 8090
 CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8090", "--no-access-log"]

@@ -1,0 +1,49 @@
+# Add to the existing server compose invocation. No published ports and no GPU access.
+services:
+  hub:
+    environment:
+      EMBEDDER_URL: http://embedder:8090
+      EMBEDDER_TOKEN: ${EMBEDDER_TOKEN:?Set a private EMBEDDER_TOKEN in .env}
+  embedder:
+    build:
+      context: ./embedder
+      args:
+        MODEL_EXTRA: cpu
+    image: homemusic-embedder:cpu
+    restart: unless-stopped
+    init: true
+    cpus: 2
+    mem_limit: 8g
+    memswap_limit: 9g
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      EMBEDDER_TOKEN: ${EMBEDDER_TOKEN:?Set a private EMBEDDER_TOKEN in .env}
+      EMBEDDER_DEVICE: cpu
+      EMBEDDER_PRECISION: fp32
+      EMBEDDER_CPU_THREADS: "2"
+      EMBEDDER_BATCH: "2"
+      EMBEDDER_CLIP_BATCH: "1"
+      EMBEDDER_DOWNLOADS: "2"
+      EMBEDDER_IDLE_UNLOAD_S: "300"
+      MUSIC_ROOT: /music
+      DATA_DIR: /data
+      MODELS_DIR: /models
+      HF_HOME: /models/hf
+    volumes:
+      - embedder-data:/data
+      - embedder-models:/models
+      - /music/library:/music:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=5)"]
+      interval: 15s
+      timeout: 6s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: local
+      options: {max-size: "5m", max-file: "2"}
+
+volumes:
+  embedder-data:
+  embedder-models:
