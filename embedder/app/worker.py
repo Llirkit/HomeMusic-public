@@ -57,8 +57,11 @@ class Engine:
             log.info("model %s loaded on %s in %.1f s", self.name, self.model.device, time.monotonic() - t)
             return self.model
 
-    async def unload(self) -> None:
-        async with self._lock, self.busy:
+    async def unload(self, *, idle_for: float | None = None) -> None:
+        # Same lock order as run(): a request may have refreshed last_used while unload was waiting.
+        async with self.busy, self._lock:
+            if idle_for is not None and time.monotonic() - self.last_used < idle_for:
+                return
             if self.model:
                 await asyncio.to_thread(self.model.close)
                 self.model = None
@@ -67,11 +70,19 @@ class Engine:
 
     async def run(self, fn: Callable, *args):
         """A model call in a thread, one at a time."""
-        model = await self.ensure()
         async with self.busy:
+            model = await self.ensure()
             self.last_used = time.monotonic()
+            task = asyncio.create_task(asyncio.to_thread(fn, model, *args))
             try:
-                return await asyncio.to_thread(fn, model, *args)
+                return await asyncio.shield(task)
+            except asyncio.CancelledError:
+                # Cancelling an HTTP request does not stop its native inference thread.
+                # Keep the model locked until that thread finishes, even on shutdown.
+                try:
+                    await task
+                finally:
+                    raise
             finally:
                 self.last_used = time.monotonic()
 
@@ -182,6 +193,7 @@ class Worker:
                 nxt = self.store.claim(self.s.batch)
                 pending = asyncio.create_task(self.prepare(nxt)) if nxt else None
                 await self.embed(prepared)
+                del prepared
             except asyncio.CancelledError:
                 if pending:
                     pending.cancel()
@@ -194,7 +206,7 @@ class Worker:
     async def _idle(self) -> None:
         idle = self.s.idle_unload_s
         if idle and self.engine.model and time.monotonic() - self.engine.last_used >= idle and not self.engine.busy.locked():
-            await self.engine.unload()
+            await self.engine.unload(idle_for=idle)
         self.wake.clear()
         if self.store.pending():  # queued between the check and clear()
             return

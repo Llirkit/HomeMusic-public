@@ -1,6 +1,7 @@
 """Models: audio and text → L2-normalized vectors in one space. MuQ-MuLan (real) and a fake for tests."""
 
 import contextlib
+import gc
 import hashlib
 import json
 import logging
@@ -11,6 +12,7 @@ from typing import Protocol
 import numpy as np
 
 from .config import Settings
+from .memory import resident_bytes, trim_allocator
 
 log = logging.getLogger("embedder.model")
 
@@ -233,9 +235,16 @@ class MuQMuLan:
             return _l2(self.model(texts=texts).float().cpu().numpy())
 
     def close(self) -> None:
-        del self.model
+        before = resident_bytes()
+        self.model = None
+        # torch modules/hooks can form cycles. Collect them before flushing GPU/native allocator caches.
+        collected = gc.collect()
         if self.device == "cuda":
             self._torch.cuda.empty_cache()
+        trimmed = trim_allocator()
+        after = resident_bytes()
+        log.info("model memory released: rss_before=%s rss_after=%s collected=%d trimmed=%s",
+                 before, after, collected, trimmed)
 
 
 def load_model(settings: Settings) -> Model:
