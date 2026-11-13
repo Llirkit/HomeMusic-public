@@ -7,7 +7,7 @@
   --color-line: #2c2c2c;
   --color-fg: #f2f2f2;
   --color-muted: #a8a8a8;
-  --color-dim: #6e6e6e;
+  --color-dim: #8a8a8a;
   --color-accent: #1ed760;
   --color-accent-strong: #1db954;
   --color-danger: #f26b63;
@@ -33,6 +33,11 @@
   --tabbar-h: 0px; /* inside the Android app: no PWA tab bar */
   /* the app's own background (sent by the app as --hm-bg): no seam at its status bar and players */
   --color-bg: var(--hm-bg, #000000);
+}
+@media (min-width: 1024px) {
+  :root:not(.hm-embedded) {
+    --tabbar-h: 0px;
+  }
 }
 /* Inside the app in its light theme (the app sets .hm-light): the app's light colors, green as its accent. */
 :root.hm-embedded.hm-light {
@@ -98,6 +103,43 @@
   }
 }
 
+@media (hover: hover) and (pointer: fine) {
+  button:not(:disabled),
+  a[href],
+  input:not(:disabled),
+  textarea:not(:disabled),
+  select:not(:disabled) {
+    transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease, filter 150ms ease, transform 150ms ease;
+  }
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+  button:not(:disabled):hover {
+    filter: brightness(1.12);
+  }
+  button:not(:disabled):hover svg,
+  a[href]:hover svg {
+    transform: scale(1.08);
+  }
+  input:not(:disabled):hover,
+  textarea:not(:disabled):hover,
+  select:not(:disabled):hover {
+    border-color: var(--color-muted);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-muted) 25%, transparent);
+  }
+  .hm-media-card:hover {
+    z-index: 1;
+    background: color-mix(in srgb, var(--color-fg) 7%, transparent);
+    box-shadow: 0 12px 30px rgb(0 0 0 / 35%), 0 0 0 1px color-mix(in srgb, var(--color-fg) 15%, transparent);
+    transform: translateY(-3px);
+  }
+  .hm-media-card:hover img,
+  .hm-media-card:hover [role='img'] {
+    filter: brightness(1.08);
+    transform: scale(1.025);
+  }
+}
+
 @layer components {
   .input {
     @apply w-full rounded-lg border border-line bg-raised px-3 py-2.5 text-fg placeholder:text-dim outline-none transition-colors focus:border-accent;
@@ -108,9 +150,16 @@
   .card {
     @apply rounded-xl bg-surface;
   }
+  .hm-media-card {
+    @apply relative rounded-xl transition-[background-color,box-shadow,transform];
+  }
+  .hm-media-card img,
+  .hm-media-card [role='img'] {
+    @apply transition-[filter,transform];
+  }
   .hm-range {
     appearance: none;
-    height: 20px;
+    height: 44px;
     background: transparent;
     cursor: pointer;
   }
@@ -121,9 +170,9 @@
   }
   .hm-range::-webkit-slider-thumb {
     appearance: none;
-    width: 12px;
-    height: 12px;
-    margin-top: -4px;
+    width: 18px;
+    height: 18px;
+    margin-top: -7px;
     border-radius: 50%;
     background: var(--color-fg);
   }
@@ -138,8 +187,8 @@
     background: var(--color-fg);
   }
   .hm-range::-moz-range-thumb {
-    width: 12px;
-    height: 12px;
+    width: 18px;
+    height: 18px;
     border: 0;
     border-radius: 50%;
     background: var(--color-fg);
@@ -191,6 +240,14 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
   .anim-up,
   .skeleton {
     animation: none;

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { goBack } from '../lib/router';
 import { downloadStatusLabel, percent } from '../lib/format';
 import type { OwnedStatus } from '../api/types';
@@ -32,7 +32,7 @@ export function Button({ variant = 'secondary', icon, busy, small, block, classN
       type="button"
       className={cx(
         'inline-flex select-none items-center justify-center gap-2 rounded-full transition disabled:opacity-50 disabled:pointer-events-none',
-        small ? 'min-h-9 px-3.5 text-sm' : 'min-h-12 px-5 text-[15px]',
+        small ? 'min-h-11 px-3.5 text-sm' : 'min-h-12 px-5 text-[15px]',
         block && 'w-full',
         VARIANTS[variant],
         className,
@@ -54,6 +54,7 @@ export function IconButton({ icon, label, busy, size = 22, filled, className, di
     <button
       type="button"
       aria-label={label}
+      aria-busy={busy || undefined}
       title={label}
       className={cx(
         'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-fg transition hover:bg-fg/10 active:scale-95 disabled:opacity-40',
@@ -116,16 +117,18 @@ export function Empty({ icon = 'note', title, text, children }: { icon?: IconNam
 
 export function SkeletonRows({ n = 6 }: { n?: number }) {
   return (
-    <div className="space-y-3 px-4 py-2" aria-hidden="true">
-      {Array.from({ length: n }, (_, i) => (
-        <div key={i} className="flex items-center gap-3">
-          <div className="skeleton h-12 w-12 rounded-md" />
-          <div className="flex-1 space-y-2">
-            <div className="skeleton h-3.5 w-3/5 rounded" />
-            <div className="skeleton h-3 w-2/5 rounded" />
+    <div role="status" aria-label="Загрузка">
+      <div className="space-y-3 px-4 py-2" aria-hidden="true">
+        {Array.from({ length: n }, (_, i) => (
+          <div key={i} className="flex items-center gap-3">
+            <div className="skeleton h-12 w-12 rounded-md" />
+            <div className="flex-1 space-y-2">
+              <div className="skeleton h-3.5 w-3/5 rounded" />
+              <div className="skeleton h-3 w-2/5 rounded" />
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
@@ -166,8 +169,8 @@ export function ExplicitBadge() {
   return (
     <span
       className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-[3px] bg-muted/80 px-1 text-[10px] font-bold leading-none text-bg"
-      title="Explicit"
-      aria-label="Explicit"
+      title="Ненормативная лексика, 18+"
+      aria-label="Ненормативная лексика, 18+"
     >
       E
     </span>
@@ -211,9 +214,9 @@ export function StatusChip({ status, progress = 0 }: { status: string; progress?
   );
 }
 
-export function ProgressBar({ value, className }: { value: number; className?: string }) {
+export function ProgressBar({ value, className, label = 'Прогресс' }: { value: number; className?: string; label?: string }) {
   return (
-    <div className={cx('h-1 w-full overflow-hidden rounded-full bg-fg/10', className)} role="progressbar" aria-valuenow={percent(value)} aria-valuemin={0} aria-valuemax={100}>
+    <div className={cx('h-1 w-full overflow-hidden rounded-full bg-fg/10', className)} role="progressbar" aria-label={label} aria-valuenow={percent(value)} aria-valuemin={0} aria-valuemax={100}>
       <div className="h-full rounded-full bg-accent transition-[width] duration-300" style={{ width: `${percent(value)}%` }} />
     </div>
   );
@@ -284,16 +287,15 @@ export function Segmented<T extends string>({
   label: string;
 }) {
   return (
-    <div role="tablist" aria-label={label} className="flex gap-2 overflow-x-auto no-scrollbar">
+    <div role="group" aria-label={label} className="flex gap-2 overflow-x-auto no-scrollbar">
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
-          role="tab"
-          aria-selected={value === o.value}
+          aria-pressed={value === o.value}
           onClick={() => onChange(o.value)}
           className={cx(
-            'min-h-9 shrink-0 rounded-full px-4 text-sm transition',
+            'min-h-11 shrink-0 rounded-full px-4 text-sm transition active:scale-[0.98]',
             value === o.value ? 'bg-accent font-semibold text-on-accent' : 'bg-raised text-fg hover:bg-hover',
           )}
         >
@@ -337,15 +339,51 @@ export function Radio({ checked }: { checked: boolean }) {
 
 // --- sheet (bottom modal) -------------------------------------------------------------------------
 
-export function Sheet({ open, onClose, title, children, footer }: { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode }) {
+const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+export function useModalFocus(open: boolean, onClose: () => void) {
+  const panel = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const node = panel.current;
+    const focusable = () => Array.from(node?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []);
+    focusable()[0]?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close.current();
+      } else if (e.key === 'Tab') {
+        const items = focusable();
+        if (!items.length) return;
+        const first = items[0], last = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      previous?.focus();
+    };
+  }, [open]);
+  return panel;
+}
+
+export function Sheet({ open, onClose, title, children, footer }: { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode }) {
+  const panel = useModalFocus(open, onClose);
+  useEffect(() => {
+    if (!open) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
-      window.removeEventListener('keydown', onKey);
       document.body.style.overflow = prev;
     };
   }, [open, onClose]);
@@ -353,7 +391,7 @@ export function Sheet({ open, onClose, title, children, footer }: { open: boolea
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" role="dialog" aria-modal="true" aria-label={title}>
       <button type="button" aria-label="Закрыть" className="absolute inset-0 bg-black/70" onClick={onClose} />
-      <div className="anim-up pb-safe relative flex max-h-[88dvh] w-full max-w-lg flex-col rounded-t-2xl bg-surface sm:rounded-2xl">
+      <div ref={panel} className="anim-up pb-safe relative flex max-h-[88dvh] w-full max-w-lg flex-col rounded-t-2xl bg-surface sm:rounded-2xl">
         <div className="flex items-center gap-2 border-b border-line px-4 py-2">
           <h2 className="flex-1 truncate text-base font-bold">{title}</h2>
           <IconButton icon="x" label="Закрыть" onClick={onClose} />
@@ -368,7 +406,7 @@ export function Sheet({ open, onClose, title, children, footer }: { open: boolea
 export function Notice({ kind = 'warn', children }: { kind?: 'warn' | 'error' | 'info'; children: ReactNode }) {
   const color = kind === 'error' ? 'text-danger bg-danger/10' : kind === 'info' ? 'text-info bg-info/10' : 'text-warn bg-warn/10';
   return (
-    <div className={cx('flex items-start gap-2 rounded-lg px-3 py-2 text-sm', color)}>
+    <div className={cx('flex items-start gap-2 rounded-lg px-3 py-2 text-sm', color)} role={kind === 'error' ? 'alert' : 'status'}>
       <Icon name="alert" size={18} className="mt-0.5 shrink-0" />
       <div className="min-w-0">{children}</div>
     </div>

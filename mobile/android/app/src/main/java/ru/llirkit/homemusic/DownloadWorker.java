@@ -127,6 +127,14 @@ public final class DownloadWorker extends Worker {
           Files.move(
               partial.toPath(), new File(song.file).toPath(), StandardCopyOption.REPLACE_EXISTING);
           db.ready(song, mime, size);
+          // Текст необязателен: его отсутствие или ошибка не отменяют сохранённое аудио.
+          try {
+            String lyrics = Api.text(song.base, "/api/lyrics?ref=" + Api.encode("nd:" + song.sid));
+            JSONObject result = new JSONObject(lyrics);
+            if (!result.optString("status").equals("temporarily_unavailable")) db.lyrics(song, lyrics);
+          } catch (Exception ignored) {
+            // Получение можно повторить кнопкой «Текст песни» при наличии сети.
+          }
         } catch (Exception e) {
           partial.delete();
           String message =

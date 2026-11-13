@@ -213,3 +213,44 @@ async def apk_artifact(name: str):
         raise HTTPException(404, "Нет сборки приложения")
     media_type = "application/vnd.android.package-archive" if name.endswith(".apk") else "application/octet-stream"
     return FileResponse(path, media_type=media_type, filename=name, headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
+# Windows NSIS updates: metadata stays fresh, versioned binaries are immutable and support HTTP Range.
+def _windows_dir() -> Path:
+    settings = get_settings()
+    return settings.windows_releases_dir or settings.data_dir / "windows-releases"
+
+
+@router.get("/desktop/latest.exe")
+async def windows_latest():
+    from fastapi import HTTPException
+    from starlette.concurrency import run_in_threadpool
+
+    from app.windows_releases import read_release
+
+    try:
+        data = await run_in_threadpool(read_release, _windows_dir())
+    except (OSError, ValueError):
+        raise HTTPException(404, "Windows-релиз пока не опубликован") from None
+    return RedirectResponse(f"/desktop/updates/windows/x64/{data['path']}", status_code=307,
+                            headers={"Cache-Control": "no-store"})
+
+
+@router.get("/desktop/updates/windows/x64/{name}")
+async def windows_update(name: str):
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+    from starlette.concurrency import run_in_threadpool
+
+    from app.windows_releases import artifact, read_release
+
+    directory = _windows_dir()
+    try:
+        if name == "latest.yml":
+            await run_in_threadpool(read_release, directory)
+            return FileResponse(directory / name, media_type="application/yaml", headers={"Cache-Control": "no-store"})
+        path = await run_in_threadpool(artifact, directory, name)
+    except (OSError, ValueError):
+        raise HTTPException(404, "Файл Windows-релиза не найден") from None
+    return FileResponse(path, media_type="application/octet-stream", filename=name,
+                        headers={"Cache-Control": "public, max-age=31536000, immutable"})

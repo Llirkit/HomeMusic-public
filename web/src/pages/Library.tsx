@@ -1,24 +1,32 @@
 import { useEffect, useState } from 'react';
 import { api, libraryCoverUrl, withQuery } from '../api/client';
-import type { LibAlbumOut, ReleaseType } from '../api/types';
+import type { LibAlbumOut, LibTrackOut, ReleaseType } from '../api/types';
 import { Icon, type IconName } from '../components/Icon';
-import { Button, Cover, Empty, ErrorState, Field, IconButton, SectionTitle, Sheet, SkeletonRows } from '../components/ui';
+import { Button, Cover, Empty, ErrorState, ExplicitBadge, Field, IconButton, SectionTitle, Segmented, Sheet, SkeletonRows } from '../components/ui';
+import { LikeButton } from '../components/LikeButton';
 import { STANDALONE } from '../lib/embedded';
 import { useHubEvent } from '../lib/events';
-import { recordTypeLabel, toIntOrNull, tracksWord } from '../lib/format';
+import { fmtDuration, recordTypeLabel, toIntOrNull, tracksWord } from '../lib/format';
 import { useAsync, useDebounced } from '../lib/hooks';
 import { Link, navigate } from '../lib/router';
 import { attempt } from '../lib/ui';
+import { listen, listenAll, type ListenTrack } from '../lib/listen';
+import { canPlay, playList } from '../lib/player';
 
 const PAGE = 50;
 
 export function LibraryPage({ initialQuery }: { initialQuery: string }) {
   const [q, setQ] = useState(initialQuery);
+  const [view, setView] = useState<'albums' | 'tracks'>('albums');
+  const [trackSort, setTrackSort] = useState<'artist' | 'title' | 'album'>('artist');
   const dq = useDebounced(q.trim(), 350);
   const [extra, setExtra] = useState<LibAlbumOut[]>([]);
+  const [trackExtra, setTrackExtra] = useState<LibTrackOut[]>([]);
   const [more, setMore] = useState<{ busy: boolean; done: boolean }>({ busy: false, done: false });
+  const [trackMore, setTrackMore] = useState<{ busy: boolean; done: boolean }>({ busy: false, done: false });
   const [createOpen, setCreateOpen] = useState(false);
   const res = useAsync((s) => api.libAlbums(dq, 0, PAGE, s), [dq]);
+  const trackRes = useAsync((s) => api.libTracks(dq, trackSort, 0, PAGE, s), [dq, trackSort], view === 'tracks');
   // «Перенести музыку» lives here too: the app has no «Ещё»; the banner shows until the first import
   const imports = useAsync((s) => api.imports(s), []);
   const offerImport = imports.data?.length === 0 && !dq;
@@ -26,6 +34,8 @@ export function LibraryPage({ initialQuery }: { initialQuery: string }) {
   useEffect(() => {
     setExtra([]);
     setMore({ busy: false, done: false });
+    setTrackExtra([]);
+    setTrackMore({ busy: false, done: false });
     const target = withQuery('/library', { q: dq });
     if (window.location.hash !== '#' + target) navigate(target, { replace: true });
   }, [dq]);
@@ -33,13 +43,22 @@ export function LibraryPage({ initialQuery }: { initialQuery: string }) {
   useHubEvent('library', () => res.reload(true));
 
   const albums = [...(res.data ?? []), ...extra];
+  const tracks = [...(trackRes.data ?? []), ...trackExtra];
   const canMore = !more.done && (res.data?.length ?? 0) >= PAGE;
+  const canMoreTracks = !trackMore.done && (trackRes.data?.length ?? 0) >= PAGE;
 
   const loadMore = async () => {
     setMore({ busy: true, done: false });
     const next = await attempt(() => api.libAlbums(dq, albums.length, PAGE));
     setExtra((x) => [...x, ...(next ?? [])]);
     setMore({ busy: false, done: !next || next.length < PAGE });
+  };
+
+  const loadMoreTracks = async () => {
+    setTrackMore({ busy: true, done: false });
+    const next = await attempt(() => api.libTracks(dq, trackSort, tracks.length, PAGE));
+    setTrackExtra((x) => [...x, ...(next ?? [])]);
+    setTrackMore({ busy: false, done: !next || next.length < PAGE });
   };
 
   return (
@@ -55,7 +74,17 @@ export function LibraryPage({ initialQuery }: { initialQuery: string }) {
         </div>
         <div className="relative">
           <Icon name="search" size={18} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-dim" />
-          <input className="input pl-10" type="search" placeholder="Поиск по альбомам" aria-label="Поиск по альбомам" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input className="input pl-10" type="search" placeholder={view === 'tracks' ? 'Поиск по трекам' : 'Поиск по альбомам'} aria-label={view === 'tracks' ? 'Поиск по трекам' : 'Поиск по альбомам'} value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <Segmented label="Вид библиотеки" value={view} onChange={setView} options={[{ value: 'albums', label: 'Альбомы' }, { value: 'tracks', label: 'Треки' }]} />
+          {view === 'tracks' && (
+            <select className="min-h-11 rounded-full border border-line bg-raised px-3 text-sm" aria-label="Сортировка треков" value={trackSort} onChange={(e) => setTrackSort(e.target.value as typeof trackSort)}>
+              <option value="artist">По исполнителю</option>
+              <option value="title">По названию</option>
+              <option value="album">По альбому</option>
+            </select>
+          )}
         </div>
       </header>
 
@@ -81,7 +110,16 @@ export function LibraryPage({ initialQuery }: { initialQuery: string }) {
           <Icon name="chevron" size={18} className="shrink-0 text-dim" />
         </Link>
       )}
-      {res.loading ? (
+      {view === 'tracks' ? (
+        trackRes.loading ? <SkeletonRows /> : trackRes.error ? <ErrorState text={trackRes.error} onRetry={() => trackRes.reload()} /> : tracks.length === 0 ? (
+          <Empty icon={dq ? 'search' : 'note'} title={dq ? 'Ничего не найдено' : 'В библиотеке нет треков'} />
+        ) : (
+          <>
+            <TrackList tracks={tracks} />
+            {canMoreTracks && <div className="flex justify-center py-5"><Button busy={trackMore.busy} onClick={loadMoreTracks}>Показать ещё</Button></div>}
+          </>
+        )
+      ) : res.loading ? (
         <SkeletonRows />
       ) : res.error ? (
         <ErrorState text={res.error} onRetry={() => res.reload()} />
@@ -104,7 +142,7 @@ export function LibraryPage({ initialQuery }: { initialQuery: string }) {
         <>
           <div className="grid grid-cols-2 gap-x-4 gap-y-5 px-4 pt-1 min-[520px]:grid-cols-3">
             {albums.map((a) => (
-              <Link key={a.id} to={`/library/album/${a.id}`} className="min-w-0">
+              <Link key={a.id} to={`/library/album/${a.id}`} className="hm-media-card min-w-0">
                 <Cover src={a.has_cover ? libraryCoverUrl(a.id, 300) : null} alt={a.title} className="aspect-square w-full" icon="disc" />
                 <div className="mt-2 truncate text-sm font-medium">{a.title}</div>
                 <div className="truncate text-xs text-muted">{[a.album_artist, a.year].filter(Boolean).join(' · ')}</div>
@@ -124,6 +162,35 @@ export function LibraryPage({ initialQuery }: { initialQuery: string }) {
 
       <CreateAlbumSheet open={createOpen} onClose={() => setCreateOpen(false)} />
     </div>
+  );
+}
+
+function TrackList({ tracks }: { tracks: LibTrackOut[] }) {
+  const playable = tracks.filter((t) => t.nd_song_id);
+  const asListen = (t: LibTrackOut): ListenTrack => ({
+    ref: `nd:${t.nd_song_id}`, title: t.title, artist: t.artist, album: t.album ?? undefined, duration_s: t.duration_s,
+    cover_small_url: t.album_id ? libraryCoverUrl(t.album_id, 120) : null,
+  });
+  const playFrom = (track: LibTrackOut) => {
+    if (canPlay()) return playList(playable, (t) => t.nd_song_id, track);
+    const queue = playable.map(asListen);
+    listen(asListen(track), queue, 'library');
+  };
+  return (
+    <ul className="divide-y divide-line/60" aria-label="Треки библиотеки">
+      {tracks.map((track) => (
+        <li key={track.id} className="group flex min-h-16 items-center gap-3 px-4 py-2 transition-colors hover:bg-fg/5">
+          <Cover src={track.album_id ? libraryCoverUrl(track.album_id, 120) : null} alt="" size={48} icon="note" />
+          <Link to={track.album_id ? `/library/album/${track.album_id}` : '/library'} className="min-w-0 flex-1 rounded-md">
+            <span className="flex items-center gap-1.5"><span className="truncate font-medium group-hover:text-accent">{track.title}</span>{track.explicit && <ExplicitBadge />}</span>
+            <span className="block truncate text-sm text-muted">{[track.artist, track.album].filter(Boolean).join(' · ')}</span>
+          </Link>
+          <span className="hidden shrink-0 text-xs tabular-nums text-dim sm:block">{fmtDuration(track.duration_s)}</span>
+          <LikeButton songId={track.nd_song_id} title={track.title} />
+          {track.nd_song_id && <IconButton icon="play" label={`Слушать «${track.title}»`} className="text-accent" onClick={() => playFrom(track)} />}
+        </li>
+      ))}
+    </ul>
   );
 }
 

@@ -75,7 +75,7 @@ function greeting(): string {
 
 function Shortcut({ to, icon, title }: { to: string; icon: IconName; title: string }) {
   return (
-    <Link to={to} className="flex min-h-14 items-center gap-2.5 rounded-lg bg-raised px-3 py-2 text-sm font-semibold transition hover:bg-hover">
+    <Link to={to} className="group flex min-h-14 items-center gap-2.5 rounded-lg bg-raised px-3 py-2 text-sm font-semibold shadow-sm transition hover:-translate-y-0.5 hover:bg-hover hover:shadow-lg hover:ring-1 hover:ring-fg/15">
       <Icon name={icon} size={20} className="shrink-0 text-accent" />
       <span className="truncate">{title}</span>
     </Link>

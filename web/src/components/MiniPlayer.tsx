@@ -6,6 +6,7 @@ import { addRec, hideRec } from '../lib/smartShuffle';
 import { Link, enc } from '../lib/router';
 import { Icon } from './Icon';
 import { LikeButton } from './LikeButton';
+import { LyricsButton } from './Lyrics';
 import { TrackMenuButton } from './TrackMenu';
 import { Cover, IconButton, Spinner, cx } from './ui';
 
@@ -101,7 +102,7 @@ export function MiniPlayer() {
   );
 
   return (
-    <div ref={box} className="fixed inset-x-0 bottom-[calc(var(--tabbar-h)+env(safe-area-inset-bottom))] z-40 mx-auto max-w-2xl px-2 pb-2" role="region" aria-label="Прослушивание">
+    <div ref={box} className="fixed inset-x-0 bottom-[calc(var(--tabbar-h)+env(safe-area-inset-bottom))] z-40 mx-auto max-w-2xl px-2 pb-2 lg:left-60 lg:max-w-none lg:px-4" role="region" aria-label="Прослушивание">
       <div className="anim-up overflow-hidden rounded-xl border border-line bg-raised/95 shadow-2xl backdrop-blur">
         <div className="flex items-center gap-2 py-1.5 pl-2 pr-1">
           {STANDALONE ? (
@@ -125,7 +126,8 @@ export function MiniPlayer() {
                 onChange={(e) => setVolume(Number(e.target.value) / 100)} />
             </div>
           )}
-          <TrackMenuButton track={{ ...track, nd_song_id: info?.nd_song_id }} className="w-9" inPlayer />
+          <TrackMenuButton track={{ ...track, nd_song_id: info?.nd_song_id }} className="w-11" inPlayer />
+          <LyricsButton compact />
           <LikeButton songId={info?.nd_song_id} refId={track.ref} title={track.title} data={{ ...track }} className="-mr-1" />
           <button
             type="button"
@@ -144,24 +146,24 @@ export function MiniPlayer() {
             )}
           </button>
           {STANDALONE ? null : owned || dl ? (
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center text-accent" title={owned || dl === 'done' ? 'Есть в библиотеке' : 'В загрузках'}>
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center text-accent" aria-label={owned || dl === 'done' ? 'Есть в библиотеке' : 'В загрузках'} title={owned || dl === 'done' ? 'Есть в библиотеке' : 'В загрузках'}>
               <Icon name="check" size={20} stroke={2.6} />
             </span>
           ) : (
             <IconButton icon="download" label="Скачать" onClick={download} busy={busy} />
           )}
-          <IconButton icon="x" label="Закрыть плеер" onClick={stopListening} size={18} className="w-9 text-muted" />
+          <IconButton icon="x" label="Закрыть плеер" onClick={stopListening} size={18} className="w-11 text-muted" />
         </div>
         {track.rec && (
           <div className="flex items-center gap-1 border-t border-line/60 py-0.5 pl-3 pr-1" role="group" aria-label="Рекомендация">
             <Icon name="sparkle" size={14} className="shrink-0 text-accent" />
             <span className="min-w-0 flex-1 truncate text-xs text-muted">{track.rec.label}</span>
-            <IconButton icon="plus" label={track.rec.label.includes('любим') ? 'В понравившиеся' : 'Добавить в плейлист'} onClick={() => void addRec(track)} size={18} className="h-8 w-9 !text-accent" />
-            <IconButton icon="minus" label="Не рекомендовать здесь" onClick={() => void hideRec(track)} size={18} className="h-8 w-9 text-muted" />
+            <IconButton icon="plus" label={track.rec.label.includes('любим') ? 'В понравившиеся' : 'Добавить в плейлист'} onClick={() => void addRec(track)} size={18} className="!text-accent" />
+            <IconButton icon="minus" label="Не рекомендовать здесь" onClick={() => void hideRec(track)} size={18} className="text-muted" />
           </div>
         )}
         <div className="flex items-center gap-2 pb-1 pl-1 pr-1 text-[11px] tabular-nums text-muted">
-          <IconButton icon="prev" label={canPrev ? 'Предыдущий трек' : 'Сначала'} onClick={prev} size={16} className="h-8 w-8 text-muted" />
+          <IconButton icon="prev" label={canPrev ? 'Предыдущий трек' : 'Сначала'} onClick={prev} size={16} className="text-muted" />
           <span className="w-9 shrink-0 text-right">{fmtDuration(shownPos) || '0:00'}</span>
           <input
             type="range"
@@ -179,7 +181,7 @@ export function MiniPlayer() {
             onBlur={commit}
           />
           <span className="w-9 shrink-0">{fmtDuration(duration) || '–:––'}</span>
-          <IconButton icon="next" label="Следующий трек" onClick={() => void next()} disabled={!canNext} size={16} className="h-8 w-8 text-muted" />
+          <IconButton icon="next" label="Следующий трек" onClick={() => void next()} disabled={!canNext} size={16} className="text-muted" />
         </div>
       </div>
     </div>

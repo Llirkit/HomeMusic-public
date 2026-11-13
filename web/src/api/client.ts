@@ -291,6 +291,8 @@ export const api = {
   // library
   libAlbums: (q: string, offset = 0, limit = 50, signal?: AbortSignal) =>
     request<LibAlbumOut[]>('GET', withQuery('/api/library/albums', { q, offset, limit }), { signal }),
+  libTracks: (q: string, sort = 'artist', offset = 0, limit = 50, signal?: AbortSignal) =>
+    request<LibTrackOut[]>('GET', withQuery('/api/library/tracks', { q, sort, offset, limit }), { signal }),
   libAlbum: (id: number, signal?: AbortSignal) => request<LibAlbumOut>('GET', `/api/library/albums/${id}`, { signal }),
   createAlbum: (body: AlbumCreateIn) => request<LibAlbumOut>('POST', '/api/library/albums', { json: body }),
   patchAlbum: (id: number, body: AlbumPatchIn) =>

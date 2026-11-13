@@ -159,6 +159,7 @@ class Settings(BaseSettings):
     music_root: Path = Path("/music")
     data_dir: Path = Path("/data")
     android_releases_dir: Path | None = None
+    windows_releases_dir: Path | None = None
     config_file: Path = Path("/config/config.yaml")
     static_dir: Path = Path(__file__).parent / "static"
 
@@ -196,6 +197,8 @@ class Settings(BaseSettings):
 
     # Last.fm API (similar tracks/artists, tags for mix names): https://www.last.fm/api/account/create
     lastfm_api_key: str = ""
+    # Бесплатный developer-токен Genius; без него используется только LRCLIB.
+    genius_access_token: str = ""
     # the audio vector service (MIXES.md 4.2) in the compose network; empty, or it doesn't answer — mixes are built
     # without the audio term
     embedder_url: str = "http://embedder:8090"

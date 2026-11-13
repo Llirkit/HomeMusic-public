@@ -18,6 +18,9 @@ __pycache__/
 # node / web
 node_modules/
 web/dist/
+desktop/dist/
+desktop/test-results/
+desktop/playwright-report/
 hub/app/static/
 
 # local data

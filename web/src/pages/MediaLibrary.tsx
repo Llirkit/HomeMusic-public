@@ -20,7 +20,7 @@ import { canWave, seedKey, startWave, useWave } from '../lib/wave';
 
 export function NdAlbumCard({ album, showArtist = true }: { album: NdAlbumOut; showArtist?: boolean }) {
   return (
-    <Link to={`/lib/album/${enc(album.id)}`} className="block min-w-0">
+    <Link to={`/lib/album/${enc(album.id)}`} className="hm-media-card block min-w-0">
       <Cover src={album.cover_url} alt={album.title} icon="disc" className="aspect-square w-full" />
       <div className="mt-2 line-clamp-2 text-sm font-medium leading-tight">{album.title}</div>
       <div className="mt-0.5 truncate text-xs text-muted">{[showArtist ? album.artist : null, album.year].filter(Boolean).join(' · ')}</div>
@@ -62,7 +62,7 @@ export function NdArtistBubble({ artist, radio = false }: { artist: NdArtistOut;
       <span className="line-clamp-2 text-sm leading-tight">{artist.name}</span>
     </>
   );
-  const cls = 'flex w-28 shrink-0 flex-col items-center gap-2 text-center';
+  const cls = 'hm-media-card flex w-28 shrink-0 flex-col items-center gap-2 text-center';
   if (radio && canWave())
     return (
       <button type="button" className={cls} aria-label={`Радио: ${artist.name}`} onClick={() => void startWave({ nd_artist_id: artist.id }, 'radio')}>

@@ -4,7 +4,55 @@ All JSON. Models are in `app/api/schemas.py` (pydantic): field names below match
 Auth: cookie `hm_session` (HttpOnly, set by login). Any endpoint except login/healthz returns `401` without it.
 Errors: `{"detail": "<Russian message>"}` with 4xx/5xx.
 
-## Auth
+## Обновления Windows-клиента
+
+Эти адреса доступны без авторизации: встроенный обновлятор работает и до входа в аккаунт.
+Файлы берутся из `WINDOWS_RELEASES_DIR`, по умолчанию `DATA_DIR/windows-releases` в постоянном томе Хаба.
+
+| Метод | Путь | Ответ |
+|---|---|---|
+| GET | `/desktop/latest.exe` | `307` на установщик текущего релиза; `Cache-Control: no-store` |
+| GET | `/desktop/updates/windows/x64/latest.yml` | Манифест electron-builder с версией, размером и SHA-512; `no-store` |
+| GET | `/desktop/updates/windows/x64/HomeMusic-Setup-{version}.exe` | Неизменяемый установщик, поддержка HTTP Range (`206`) |
+| GET | `/desktop/updates/windows/x64/HomeMusic-Setup-{version}.exe.blockmap` | Карта блоков для дифференциального обновления |
+
+Версии имеют вид `X.Y.Z`. Файлы устанавливаются раньше манифеста; неполный или некорректный
+релиз возвращает `404`. Публикация: `python scripts/publish_windows_release.py SOURCE TARGET`
+из контейнера Хаба; скрипт проверяет размер и SHA-512, запрещает изменение опубликованных файлов
+и откат версии, затем атомарно заменяет `latest.yml`. Доступны только файлы Windows-релизов.
+
+## Тексты песен
+
+`GET /api/lyrics?ref=dz:123` — требует cookie `hm_session`. `ref` поддерживает `dz:`, `nd:`, `hm:`, `file:`.
+Необязательные `artist`, `title`, `album` (до 512 символов) и `duration_s` (секунды, > 0, ≤ 86400)
+используются как запасные метаданные. Сервер предпочитает библиотеку, сохранённый выбор аудио и каталог.
+Получение текста не запускает скачивание аудио. Схема ответа — `app/lyrics.py:LyricsOut`:
+
+```json
+{
+  "ref": "dz:123",
+  "status": "found",
+  "plain": "Первая строка\nВторая строка",
+  "lines": [{"start_ms": 1500, "text": "Первая строка"}],
+  "synced": true,
+  "duration_s": 180,
+  "source": "LRCLIB",
+  "source_url": "https://lrclib.net"
+}
+```
+
+`status`: `found`, `not_found`, `instrumental`, `temporarily_unavailable`. Отсутствие текста и временная
+недоступность возвращаются как состояния с HTTP 200; неверные параметры — 422, отсутствие входа — 401.
+Время `start_ms` — от начала полной записи, LRC offset уже применён; пустые строки обозначают проигрыш.
+Синхронизация выдаётся только при совпадении длительности с метаданными в пределах 3 секунд.
+Клиент дополнительно сверяет фактическую длительность аудио; для превью использует `plain`.
+
+Источники: бесплатный LRCLIB, затем Genius при заданном `GENIUS_ACCESS_TOKEN`. Кеш использует
+существующую таблицу `catalog_cache`, отдельная миграция Хаба не нужна. Найденное хранится 30 дней,
+отсутствие — 6 часов, временная ошибка — 30 секунд. Ограничение частоты действует отдельно для каждого
+источника, `Retry-After` соблюдается; одновременные одинаковые запросы разделяют одно получение.
+
+## Авторизация
 | Method | Path | Body → Response |
 |---|---|---|
 | POST | `/api/auth/login` | `LoginIn` → `MeOut` (+ cookie). `username` may be the email the account registered with: `MeOut.username` is then its Navidrome name (the player signs in by it). `429` with `Retry-After` when password attempts are throttled |

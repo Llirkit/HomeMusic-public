@@ -99,6 +99,7 @@ export function MorePage() {
         {me.is_admin && <SoulseekSettings />}
         {/* the player is here: in the browser, and the app's own on Android */}
         <Item icon="install" href="/app/latest.apk" title="Приложение для Android" sub="HomeMusic: офлайн, плеер в шторке, тот же аккаунт" />
+        <Item icon="install" href="/desktop/latest.exe" title="Приложение для Windows" sub="Кнопки на панели задач и автоматические обновления" />
         {me.public_music_url && <Item icon="external" href={me.public_music_url} title="Navidrome" sub="Веб-интерфейс библиотеки" />}
         <Item
           icon="bell"

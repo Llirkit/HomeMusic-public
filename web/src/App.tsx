@@ -1,11 +1,11 @@
 import { setListeningAccount } from './lib/plays';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ApiError, UNAUTHORIZED_EVENT, api, errorMessage, invalidateCache } from './api/client';
 import type { MeOut } from './api/types';
 import { MiniPlayer, PlayerSpacer } from './components/MiniPlayer';
 import { Overlays } from './components/Overlays';
 import { TabBar, type Tab } from './components/TabBar';
-import { ErrorState, Spinner, cx } from './components/ui';
+import { ErrorState, Loading, cx } from './components/ui';
 import { STANDALONE } from './lib/embedded';
 import { hubEvents } from './lib/events';
 import { restoreListening, stopListening } from './lib/listen';
@@ -115,6 +115,7 @@ export function App() {
   const [me, setMe] = useState<MeOut | null | undefined>(undefined);
   const [bootError, setBootError] = useState<string>();
   const route = useRoute();
+  const mainRef = useRef<HTMLElement>(null);
 
   const updateSession = useCallback((next: MeOut | null) => {
     setAssistantAccount(next?.id ?? null);
@@ -168,6 +169,16 @@ export function App() {
     if (me && !resolved) navigate(START, { replace: true });
   }, [me, resolved]);
 
+  useEffect(() => {
+    if (!me || !resolved) return;
+    const frame = window.requestAnimationFrame(() => {
+      const heading = mainRef.current?.querySelector('h1')?.textContent?.trim();
+      document.title = heading ? `${heading} · HomeMusic` : 'HomeMusic';
+      mainRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [me, route.full, !!resolved]);
+
   const logout = useCallback(async () => {
     setAssistantAccount(null);
     try {
@@ -188,10 +199,10 @@ export function App() {
         {bootError ? (
           <ErrorState text={`Не удалось связаться с сервером. ${bootError}`} onRetry={boot} />
         ) : (
-          <>
+          <div className="flex flex-col items-center gap-2">
             <img src="/icons/icon.svg" alt="" width={72} height={72} className="rounded-2xl" />
-            <Spinner className="text-accent" />
-          </>
+            <Loading text="Загрузка HomeMusic…" />
+          </div>
         )}
         <Overlays />
       </div>
@@ -213,7 +224,7 @@ export function App() {
   const wide = route.path.startsWith('/admin/');
   return (
     <SessionContext.Provider value={{ me, logout }}>
-      <main className={cx('mx-auto min-h-dvh', wide ? 'max-w-6xl' : 'max-w-2xl', !fullPlayer && 'pb-[calc(var(--tabbar-h)+16px+env(safe-area-inset-bottom))]')}>
+      <main ref={mainRef} tabIndex={-1} className={cx('mx-auto min-h-dvh outline-none lg:ml-60 lg:max-w-none', wide ? 'max-w-6xl' : 'max-w-2xl', !fullPlayer && 'pb-[calc(var(--tabbar-h)+16px+env(safe-area-inset-bottom))]')}>
         {resolved?.node}
         {!fullPlayer && <PlayerSpacer />}
       </main>

@@ -1222,6 +1222,19 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<boolea
   }
 
   // library
+  if (p === '/api/library/tracks' && m === 'GET') {
+    const q = (url.searchParams.get('q') ?? '').toLowerCase();
+    const sort = url.searchParams.get('sort') ?? 'artist';
+    const offset = Number(url.searchParams.get('offset') ?? 0);
+    const limit = Number(url.searchParams.get('limit') ?? 50);
+    const rows = libTracks.filter((t) => !q || `${t.artist} ${t.title} ${t.album ?? ''}`.toLowerCase().includes(q));
+    rows.sort((a, b) => {
+      if (sort === 'title') return a.title.localeCompare(b.title, 'ru') || a.artist.localeCompare(b.artist, 'ru');
+      if (sort === 'album') return String(a.album ?? '').localeCompare(String(b.album ?? ''), 'ru') || (a.track_no ?? 0) - (b.track_no ?? 0);
+      return a.artist.localeCompare(b.artist, 'ru') || a.title.localeCompare(b.title, 'ru');
+    });
+    return send(res, 200, rows.slice(offset, offset + limit)), true;
+  }
   if (p === '/api/library/albums' && m === 'GET') {
     const q = (url.searchParams.get('q') ?? '').toLowerCase();
     return send(res, 200, libAlbums.filter((a) => !q || a.title.toLowerCase().includes(q) || a.album_artist.toLowerCase().includes(q)).map((a) => libAlbumOut(a))), true;

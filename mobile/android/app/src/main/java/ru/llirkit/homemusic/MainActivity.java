@@ -23,7 +23,7 @@ import org.json.*;
 public final class MainActivity extends Activity {
   private final ExecutorService network = Executors.newSingleThreadExecutor();
   private final Handler handler = new Handler(Looper.getMainLooper());
-  private final int INK = Color.rgb(231, 237, 245), MUTED = Color.rgb(157, 171, 190);
+  private final int INK = Color.rgb(242, 242, 242), MUTED = Color.rgb(168, 168, 168);
   private WebView web;
   private LinearLayout offline;
   private FrameLayout pages;
@@ -31,7 +31,7 @@ public final class MainActivity extends Activity {
   private Store db;
   private android.content.SharedPreferences prefs;
   private String base, owner = "";
-  private boolean offlineVisible = false, pageFailed = false;
+  private boolean offlineVisible = false, pageFailed = false, pageLoading = true;
   private List<Store.Song> rows = new ArrayList<>();
   private BaseAdapter adapter;
   private MediaController controller;
@@ -39,6 +39,10 @@ public final class MainActivity extends Activity {
   private TextView nowPlaying, playTime;
   private SeekBar seek;
   private Button playButton, previousButton, nextButton;
+  private Button lyricsButton;
+  private Button homeTab, offlineTab;
+  private ProgressBar webLoading;
+  private OfflineLyricsDialog lyricsDialog;
   private boolean seeking = false;
   private ValueCallback<Uri[]> files;
   private View webError;
@@ -93,7 +97,7 @@ public final class MainActivity extends Activity {
     db = new Store(this);
     LinearLayout root = new LinearLayout(this);
     root.setOrientation(LinearLayout.VERTICAL);
-    root.setBackgroundColor(Color.rgb(13, 17, 24));
+    root.setBackgroundColor(Color.rgb(11, 11, 11));
     root.setOnApplyWindowInsetsListener(
         (v, insets) -> {
           if (Build.VERSION.SDK_INT >= 30) {
@@ -123,10 +127,10 @@ public final class MainActivity extends Activity {
     pages.addView(offline, new FrameLayout.LayoutParams(-1, -1));
     LinearLayout tabs = new LinearLayout(this);
     tabs.setPadding(dp(8), 0, dp(8), 0);
-    tabs.addView(
-        button("HomeMusic", v -> showOffline(false)), new LinearLayout.LayoutParams(0, dp(56), 1));
-    tabs.addView(
-        button("Офлайн", v -> showOffline(true)), new LinearLayout.LayoutParams(0, dp(56), 1));
+    homeTab = button("HomeMusic", v -> showOffline(false));
+    offlineTab = button("Офлайн", v -> showOffline(true));
+    tabs.addView(homeTab, new LinearLayout.LayoutParams(0, dp(56), 1));
+    tabs.addView(offlineTab, new LinearLayout.LayoutParams(0, dp(56), 1));
     root.addView(tabs);
     setContentView(root);
     controllerFuture =
@@ -164,14 +168,21 @@ public final class MainActivity extends Activity {
           != PackageManager.PERMISSION_GRANTED)
         requestPermissions(new String[] {Manifest.permission.POST_NOTIFICATIONS}, 9);
     }
-    web.loadUrl(base);
-    showOffline(getIntent().getBooleanExtra("offline", false));
+    webLoading = new ProgressBar(this);
+    webLoading.setIndeterminate(true);
+    webLoading.setContentDescription("Загрузка HomeMusic");
+    FrameLayout.LayoutParams loadingParams = new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER);
+    pages.addView(webLoading, loadingParams);
+    boolean restored = saved != null && web.restoreState(saved) != null;
+    pageLoading = !restored;
+    if (!restored) web.loadUrl(base);
+    showOffline(saved != null ? saved.getBoolean("offline", false) : getIntent().getBooleanExtra("offline", false));
   }
 
   @SuppressWarnings("deprecation")
   private void createWeb() {
     web = new WebView(this);
-    web.setBackgroundColor(Color.rgb(13, 17, 24));
+    web.setBackgroundColor(Color.rgb(11, 11, 11));
     WebSettings s = web.getSettings();
     s.setJavaScriptEnabled(true);
     s.setDomStorageEnabled(true);
@@ -198,6 +209,8 @@ public final class MainActivity extends Activity {
           @Override
           public void onPageStarted(WebView v, String u, android.graphics.Bitmap icon) {
             pageFailed = false;
+            pageLoading = true;
+            if (webLoading != null) webLoading.setVisibility(View.VISIBLE);
           }
 
           @Override
@@ -212,6 +225,8 @@ public final class MainActivity extends Activity {
           public void onPageFinished(WebView v, String u) {
             if (pageFailed || !Identity.sameOrigin(base, u)) return;
             hideWebError();
+            pageLoading = false;
+            if (webLoading != null) webLoading.setVisibility(View.GONE);
             v.evaluateJavascript(
                 "document.addEventListener('play',function(e){if(e.target instanceof"
                     + " HTMLMediaElement)SpotikOffline.onWebPlaybackStarted()},true)",
@@ -223,6 +238,18 @@ public final class MainActivity extends Activity {
           public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {
             if (r.isForMainFrame()) {
               pageFailed = true;
+              pageLoading = false;
+              if (webLoading != null) webLoading.setVisibility(View.GONE);
+              showWebError();
+            }
+          }
+
+          @Override
+          public void onReceivedHttpError(WebView v, WebResourceRequest r, WebResourceResponse response) {
+            if (r.isForMainFrame() && response.getStatusCode() >= 400) {
+              pageFailed = true;
+              pageLoading = false;
+              if (webLoading != null) webLoading.setVisibility(View.GONE);
               showWebError();
             }
           }
@@ -343,7 +370,7 @@ public final class MainActivity extends Activity {
     LinearLayout playerBox = new LinearLayout(this);
     playerBox.setOrientation(LinearLayout.VERTICAL);
     playerBox.setPadding(dp(8), dp(10), dp(8), dp(8));
-    playerBox.setBackgroundColor(Color.rgb(21, 30, 41));
+    playerBox.setBackgroundColor(Color.rgb(22, 22, 22));
     nowPlaying = text("Выберите сохранённую песню", 15);
     nowPlaying.setMaxLines(2);
     nowPlaying.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -351,7 +378,7 @@ public final class MainActivity extends Activity {
     seek = new SeekBar(this);
     seek.setMax(1000);
     seek.setContentDescription("Позиция в песне");
-    playerBox.addView(seek, new LinearLayout.LayoutParams(-1, dp(36)));
+    playerBox.addView(seek, new LinearLayout.LayoutParams(-1, dp(48)));
     playTime = text("0:00 / 0:00", 12);
     playTime.setTextColor(MUTED);
     playerBox.addView(playTime);
@@ -404,6 +431,13 @@ public final class MainActivity extends Activity {
     for (Button b : new Button[] {previousButton, playButton, nextButton})
       buttons.addView(b, new LinearLayout.LayoutParams(0, dp(48), 1));
     playerBox.addView(buttons);
+    lyricsButton = button("Текст песни", v -> {
+      if (controller == null || controller.getCurrentMediaItem() == null) return;
+      if (lyricsDialog != null) lyricsDialog.dismiss();
+      lyricsDialog = new OfflineLyricsDialog(this, controller, owner, this::clearAccount);
+      lyricsDialog.show();
+    });
+    playerBox.addView(lyricsButton);
     offline.addView(playerBox);
     refreshPlayer();
   }
@@ -417,17 +451,23 @@ public final class MainActivity extends Activity {
     if (playButton == null) return;
     boolean loaded = controller != null && controller.getCurrentMediaItem() != null;
     playButton.setEnabled(loaded);
+    lyricsButton.setEnabled(loaded);
     previousButton.setEnabled(loaded && controller.hasPreviousMediaItem());
     nextButton.setEnabled(loaded && controller.hasNextMediaItem());
     if (!loaded) {
       nowPlaying.setText("Выберите сохранённую песню");
       seek.setEnabled(false);
+      seek.setProgress(0);
+      playTime.setText("0:00 / 0:00");
+      playButton.setText("Слушать");
       return;
     }
     MediaMetadata m = controller.getMediaMetadata();
     nowPlaying.setText(
         (m.artist == null ? "" : m.artist + " — ") + (m.title == null ? "Музыка" : m.title));
-    playButton.setText(controller.isPlaying() ? "Пауза" : "Слушать");
+    boolean buffering = controller.getPlaybackState() == Player.STATE_BUFFERING;
+    playButton.setText(buffering ? "Загрузка…" : controller.isPlaying() ? "Пауза" : "Слушать");
+    playButton.setEnabled(!buffering);
     long duration = Math.max(0, controller.getDuration()),
         position = Math.max(0, controller.getCurrentPosition());
     seek.setEnabled(duration > 0);
@@ -461,9 +501,16 @@ public final class MainActivity extends Activity {
 
   private void showOffline(boolean show) {
     offlineVisible = show;
+    homeTab.setSelected(!show);
+    offlineTab.setSelected(show);
+    homeTab.setAlpha(show ? 0.65f : 1f);
+    offlineTab.setAlpha(show ? 1f : 0.65f);
+    homeTab.setContentDescription(show ? "HomeMusic" : "HomeMusic, выбрано");
+    offlineTab.setContentDescription(show ? "Офлайн, выбрано" : "Офлайн");
     offline.setVisibility(show ? View.VISIBLE : View.GONE);
     web.setVisibility(show ? View.GONE : View.VISIBLE);
     if (webError != null) webError.setVisibility(show ? View.GONE : View.VISIBLE);
+    if (webLoading != null) webLoading.setVisibility(!show && !pageFailed && pageLoading ? View.VISIBLE : View.GONE);
     if (show) {
       refreshRows();
       String server = base;
@@ -487,6 +534,7 @@ public final class MainActivity extends Activity {
         () -> {
           if (!base.equals(server)) return;
           if (!owner.equals(verified) && controller != null) {
+            if (lyricsDialog != null) lyricsDialog.dismiss();
             controller.pause();
             controller.clearMediaItems();
           }
@@ -500,6 +548,7 @@ public final class MainActivity extends Activity {
     ui(
         () -> {
           owner = "";
+          if (lyricsDialog != null) lyricsDialog.dismiss();
           prefs.edit().remove("owner").remove("username").apply();
           if (controller != null) {
             controller.pause();
@@ -777,7 +826,7 @@ public final class MainActivity extends Activity {
     box.setOrientation(LinearLayout.VERTICAL);
     box.setGravity(Gravity.CENTER);
     box.setPadding(dp(24), dp(24), dp(24), dp(24));
-    box.setBackgroundColor(Color.rgb(13, 17, 24));
+    box.setBackgroundColor(Color.rgb(11, 11, 11));
     box.addView(text("Нет соединения с HomeMusic", 22));
     box.addView(
         text("Проверьте интернет или откройте сохранённую музыку на вкладке «Офлайн».", 16));
@@ -804,6 +853,20 @@ public final class MainActivity extends Activity {
     if (offlineVisible) showOffline(false);
     else if (web.canGoBack()) web.goBack();
     else finish();
+  }
+
+  @Override
+  protected void onNewIntent(Intent intent) {
+    super.onNewIntent(intent);
+    setIntent(intent);
+    if (intent.getBooleanExtra("offline", false)) showOffline(true);
+  }
+
+  @Override
+  protected void onSaveInstanceState(Bundle out) {
+    web.saveState(out);
+    out.putBoolean("offline", offlineVisible);
+    super.onSaveInstanceState(out);
   }
 
   // API 33+ uses the registered OnBackInvokedDispatcher; this override serves Android 8–12 only.
@@ -836,6 +899,7 @@ public final class MainActivity extends Activity {
 
   @Override
   protected void onDestroy() {
+    if (lyricsDialog != null) lyricsDialog.dismiss();
     handler.removeCallbacks(tick);
     if (files != null) files.onReceiveValue(null);
     network.shutdownNow();

@@ -748,12 +748,12 @@ class HealthOut(BaseModel):
     ok: bool
     navidrome: bool
     providers: dict[str, Any] = Field(default_factory=dict)
-    version: str = "0.1.0"
+    version: str = "0.2.0"
     today: date | None = None
     # id of the PWA build the Hub serves (index.html <meta name="hm-build">); pages compare it with their own
     web_build: str | None = None
     capabilities: list[str] = ["typed_favorites_v1", "favorite_compensation_chains_v1", "catalog_favorite_download_v1",
-                               "listening_checkpoints_v1", "launch_events_v1", "wave_origin_v1", "smart_shuffle_v1"]
+                               "listening_checkpoints_v1", "launch_events_v1", "wave_origin_v1", "smart_shuffle_v1", "lyrics_v1"]
 
 
 # --- listening data (MIXES.md 3.2) -------------------------------------------------------------------------------

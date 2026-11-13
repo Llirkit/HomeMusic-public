@@ -95,6 +95,24 @@ async def list_albums(q: str | None = None, offset: int = 0, limit: int = Query(
     ]
 
 
+@router.get("/api/library/tracks", response_model=list[LibTrackOut])
+async def list_tracks(q: str | None = None, sort: str = "artist", offset: int = 0,
+                      limit: int = Query(50, le=200), user: User = Depends(current_user),
+                      s: AsyncSession = Depends(get_session, scope="function")):
+    rows = (await s.execute(select(Track))).scalars().all()
+    if q:
+        words = normalize_title(q).text.split()
+        rows = [t for t in rows if all(
+            word in normalize_title(f"{t.artist} {t.title} {t.album or ''}").text for word in words
+        )]
+    key = {
+        "title": lambda t: (normalize_title(t.title).text, normalize_title(t.artist).text, t.id),
+        "album": lambda t: (normalize_title(t.album or "").text, t.disc_no or 1, t.track_no or 0, t.id),
+    }.get(sort, lambda t: (normalize_title(t.artist).text, normalize_title(t.title).text, t.id))
+    rows.sort(key=key)
+    return [track_out(t) for t in rows[offset: offset + limit]]
+
+
 @router.post("/api/library/albums", response_model=LibAlbumOut)
 async def create_album(body: AlbumCreateIn, user: User = Depends(current_user), s: AsyncSession = Depends(get_session, scope="function")):
     a = Album(uid=str(uuid.uuid4()), title=body.title.strip(), album_artist=body.album_artist.strip(), year=body.year,

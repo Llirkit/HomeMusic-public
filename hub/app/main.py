@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
     await asyncio.to_thread(db.run_migrations)
     db.init_engine()
 
-    from app import listen
+    from app import listen, lyrics
     from app.housekeeping import scheduler_loop
     from app.jobs.downloads import playlist_adds_loop
     from app.jobs.queue import WorkerPool, recover_stale
@@ -68,6 +68,7 @@ async def lifespan(app: FastAPI):
             t.cancel()
         await pool.stop()
         await listen.reset()
+        await lyrics.reset()
         await wave.reset()
         await smart.reset()
         await svc.stop()
@@ -85,6 +86,7 @@ def create_app() -> FastAPI:
         insights,
         library,
         listen,
+        lyrics,
         medialib,
         mixes,
         playlists,
@@ -96,11 +98,11 @@ def create_app() -> FastAPI:
         wave,
     )
 
-    app = FastAPI(title="HomeMusic Hub", version="0.1.0", lifespan=lifespan, docs_url="/api/docs",
+    app = FastAPI(title="HomeMusic Hub", version="0.2.0", lifespan=lifespan, docs_url="/api/docs",
                   openapi_url="/api/openapi.json", redoc_url=None)
     for r in (auth.router, search.router, catalog.router, downloads.router, listen.router, library.router, medialib.router,
               uploads.router, playlists.router, plays.router, mixes.router, wave.router, smart_shuffle.router, imports.router, events.router, system.router, admin.router,
-              insights.router):
+              insights.router, lyrics.router):
         app.include_router(r)
     try:
         from app.api import assistant

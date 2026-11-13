@@ -1,12 +1,13 @@
 import { dismissToast, useDialog, useToasts } from '../lib/ui';
 import { navigate } from '../lib/router';
-import { Button, cx } from './ui';
+import { Button, cx, useModalFocus } from './ui';
 import { Icon } from './Icon';
 
 /** Toast stack (above the tab bar) and the global confirm dialog. */
 export function Overlays() {
   const toasts = useToasts();
   const dialog = useDialog();
+  const dialogPanel = useModalFocus(!!dialog, () => dialog?.resolve(false));
   return (
     <>
       <div className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--tabbar-h)+var(--player-h,0px)+12px+env(safe-area-inset-bottom))] z-[60] flex flex-col items-center gap-2 px-3" aria-live="polite">
@@ -44,7 +45,7 @@ export function Overlays() {
       {dialog && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-5" role="alertdialog" aria-modal="true" aria-labelledby="hm-dialog-title">
           <button type="button" aria-label="Отмена" className="absolute inset-0 bg-black/70" onClick={() => dialog.resolve(false)} />
-          <div className="anim-up relative w-full max-w-sm rounded-2xl bg-surface p-5">
+          <div ref={dialogPanel} className="anim-up relative w-full max-w-sm rounded-2xl bg-surface p-5">
             <h2 id="hm-dialog-title" className="text-lg font-bold">
               {dialog.title}
             </h2>
@@ -53,7 +54,7 @@ export function Overlays() {
               <Button variant="ghost" onClick={() => dialog.resolve(false)}>
                 {dialog.cancelLabel}
               </Button>
-              <Button variant={dialog.danger ? 'danger' : 'primary'} onClick={() => dialog.resolve(true)} autoFocus>
+              <Button variant={dialog.danger ? 'danger' : 'primary'} onClick={() => dialog.resolve(true)}>
                 {dialog.okLabel}
               </Button>
             </div>

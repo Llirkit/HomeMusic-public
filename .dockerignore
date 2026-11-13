@@ -7,6 +7,9 @@
 hub/data
 hub/app/static
 web/dist
+desktop/dist
+mobile/android/.gradle
+mobile/android/**/build
 eval
 data
 .env

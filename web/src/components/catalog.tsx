@@ -216,7 +216,7 @@ export function TrackRow({
 
 export function ArtistBubble({ artist }: { artist: CatalogArtist }) {
   return (
-    <Link to={`/artist/${enc(artist.ref)}`} className="flex w-28 shrink-0 flex-col items-center gap-2 text-center">
+    <Link to={`/artist/${enc(artist.ref)}`} className="hm-media-card flex w-28 shrink-0 flex-col items-center gap-2 text-center">
       <Cover src={artist.picture_small_url || artist.picture_url} size={104} round icon="user" alt={artist.name} />
       <span className="line-clamp-2 text-sm leading-tight">{artist.name}</span>
     </Link>
@@ -227,8 +227,8 @@ export function ArtistBubble({ artist }: { artist: CatalogArtist }) {
 export function ReleaseCard({ album, showArtist = false, onDownload, busy }: { album: AlbumOut; showArtist?: boolean; onDownload?: () => void; busy?: boolean }) {
   const year = yearOf(album);
   return (
-    <div className="relative min-w-0">
-      <Link to={`/album/${enc(album.ref)}`} className="block">
+    <div className="hm-media-card min-w-0 focus-within:ring-2 focus-within:ring-accent">
+      <Link to={`/album/${enc(album.ref)}`} className="block rounded-xl">
         <Cover src={album.cover_small_url || album.cover_url} alt={album.title} className="aspect-square w-full" />
         <div className="mt-2 line-clamp-2 text-sm font-medium leading-tight">
           {album.explicit && (

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'">
+  <title>Подключение · HomeMusic</title>
+  <link rel="stylesheet" href="setup.css">
+  <script src="setup.js" defer></script>
+</head>
+<body>
+  <main>
+    <div class="brand" aria-hidden="true">♫</div>
+    <h1>Ваша музыка. Ваш HomeMusic.</h1>
+    <p>Укажите адрес Хаба — тот же, по которому вы открываете музыку в браузере.</p>
+    <form>
+      <label for="url">Адрес Хаба</label>
+      <input id="url" name="url" type="url" required placeholder="https://music.example.ru" spellcheck="false" autocomplete="url" aria-describedby="hint error" autofocus>
+      <p id="hint" class="hint">На этом компьютере: http://localhost:8080</p>
+      <p id="error" role="alert"></p>
+      <button type="submit">Подключиться</button>
+      <p id="status" role="status" class="hint"></p>
+    </form>
+  </main>
+</body>
+</html>

@@ -10,6 +10,7 @@ import org.json.*;
 final class Store extends SQLiteOpenHelper {
   static final class Song {
     String id, owner, base, sid, title, artist, state, file, mime, error;
+    String lyrics;
     long bytes;
     int progress;
   }
@@ -17,7 +18,7 @@ final class Store extends SQLiteOpenHelper {
   private final Context context;
 
   Store(Context c) {
-    super(c, "offline.db", null, 1);
+    super(c, "offline.db", null, 2);
     context = c.getApplicationContext();
   }
 
@@ -27,12 +28,12 @@ final class Store extends SQLiteOpenHelper {
         "CREATE TABLE songs (id TEXT PRIMARY KEY,owner TEXT NOT NULL,base TEXT NOT NULL,sid TEXT"
             + " NOT NULL,title TEXT NOT NULL,artist TEXT NOT NULL,state TEXT NOT NULL,file TEXT NOT"
             + " NULL,mime TEXT,bytes INTEGER NOT NULL DEFAULT 0,progress INTEGER NOT NULL DEFAULT"
-            + " 0,error TEXT,added INTEGER NOT NULL)");
+            + " 0,error TEXT,added INTEGER NOT NULL,lyrics TEXT)");
   }
 
   @Override
   public void onUpgrade(SQLiteDatabase db, int a, int b) {
-    throw new IllegalStateException("Unsupported database migration");
+    if (a < 2) db.execSQL("ALTER TABLE songs ADD COLUMN lyrics TEXT");
   }
 
   static Song read(Cursor c) {
@@ -49,6 +50,7 @@ final class Store extends SQLiteOpenHelper {
     s.bytes = c.getLong(9);
     s.progress = c.getInt(10);
     s.error = c.getString(11);
+    s.lyrics = c.getString(c.getColumnIndexOrThrow("lyrics"));
     return s;
   }
 
@@ -61,6 +63,19 @@ final class Store extends SQLiteOpenHelper {
       while (c.moveToNext()) out.add(read(c));
     }
     return out;
+  }
+
+  Song song(String id, String owner) {
+    try (Cursor c = getReadableDatabase().query("songs", null, "id=? AND owner=?",
+        new String[] {id, owner}, null, null, null)) {
+      return c.moveToFirst() ? read(c) : null;
+    }
+  }
+
+  void lyrics(Song song, String json) {
+    ContentValues values = new ContentValues();
+    values.put("lyrics", json);
+    getWritableDatabase().update("songs", values, "id=? AND owner=?", new String[] {song.id, song.owner});
   }
 
   synchronized int enqueue(String owner, String base, JSONArray tracks, boolean[] selected)

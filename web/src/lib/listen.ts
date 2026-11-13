@@ -3,6 +3,7 @@ import { api, errorMessage, isAbort, listenStreamUrl } from '../api/client';
 import type { LaunchOrigin, ListenOut } from '../api/types';
 import { startDownload } from './actions';
 import { hubEvents } from './events';
+import { connectDesktopPlayer } from './desktopPlayer';
 import { NATIVE_PLAYING_EVENT, canPlayAll, pauseNative, webPlayerShown } from './player';
 import { listeningAccount, newEventId, newLaunch, playEvent, routeContext, type Launch } from './plays';
 
@@ -908,3 +909,5 @@ function mediaSession(track: ListenTrack) {
     /* an action the browser doesn't know */
   }
 }
+
+connectDesktopPlayer({ getState: getListenState, subscribe, toggle, previous: prev, next });
