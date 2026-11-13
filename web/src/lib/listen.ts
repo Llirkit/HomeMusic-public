@@ -5,7 +5,7 @@ import { startDownload } from './actions';
 import { hubEvents } from './events';
 import { connectDesktopPlayer } from './desktopPlayer';
 import { clearAudioPreload, preloadAudio, takePreloadedAudio } from './audioPreload';
-import { attachAudioOutput } from './audioOutput';
+import { attachAudioOutput, audioOutputReady } from './audioOutput';
 import { NATIVE_PLAYING_EVENT, canPlayAll, pauseNative, webPlayerShown } from './player';
 import { listeningAccount, newEventId, newLaunch, playEvent, routeContext, type Launch } from './plays';
 
@@ -154,6 +154,7 @@ let pendingSeek = 0;
 let resolving: AbortController | null = null;
 let prefetching: { ref: string; ctl: AbortController } | null = null;
 let playingBlob: string | null = null;
+let playRequest = 0;
 /** Seconds into a track after which ⏮ restarts it instead of going to the previous one. */
 const RESTART_AFTER_S = 3;
 /** Left after this share of a track: it counts as played to the end (`finish`), earlier — `skip`. */
@@ -357,9 +358,15 @@ function el(): HTMLAudioElement {
 }
 
 function play(a: HTMLAudioElement) {
+  const request = ++playRequest;
+  const src = a.src;
   // NotAllowedError (no user gesture): wait for the play button; AbortError: a newer track or a pause won.
-  a.play().catch((e: unknown) => {
-    if ((e as Error)?.name === 'NotAllowedError') set({ phase: 'paused' });
+  void audioOutputReady().then(() => {
+    // Restore a saved sink before emitting sound; a later pause/track change cancels this pending start.
+    if (request !== playRequest || a.src !== src || !state.track || state.phase === 'paused') return;
+    return a.play();
+  }).catch((e: unknown) => {
+    if (request === playRequest && (e as Error)?.name === 'NotAllowedError') set({ phase: 'paused' });
   });
 }
 
@@ -838,6 +845,7 @@ function resume() {
 
 export function pause() {
   if (!audio || !state.track || state.phase === 'error' || state.phase === 'ended') return;
+  playRequest++;
   audio.pause();
   set({ phase: 'paused' });
 }
@@ -860,6 +868,7 @@ export function seek(seconds: number) {
 
 /** Stops and hides the player. */
 export function stopListening() {
+  playRequest++;
   reportEnd();
   resolving?.abort();
   resolving = null;

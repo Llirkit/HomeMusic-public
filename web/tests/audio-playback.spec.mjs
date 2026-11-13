@@ -13,7 +13,7 @@ async function setup(page, options = {}) {
     }
     return route.fulfill({ json: { kind: 'full', duration_s: 180, song_ids: [], album_ids: [] } });
   });
-  await page.addInitScript(({ unsupported, webAudio, saved }) => {
+  await page.addInitScript(({ unsupported, webAudio, saved, holdRestore }) => {
     window.sinks = []; window.blobs = []; window.revoked = []; window.testAudio = [];
     const create = URL.createObjectURL.bind(URL), revoke = URL.revokeObjectURL.bind(URL);
     URL.createObjectURL = blob => { const url = create(blob); window.blobs.push(url); return url; };
@@ -33,7 +33,11 @@ async function setup(page, options = {}) {
       load() {}
       getAttribute(name) { return name === 'src' ? this.src : null; }
       removeAttribute() { this.src = ''; }
-      async setSinkId(id) { window.sinks.push(id); if (id === 'broken') throw new Error('NotFoundError'); }
+      async setSinkId(id) {
+        window.sinks.push(id);
+        if (holdRestore && id === 'headphones') await new Promise(resolve => { window.releaseOutput = resolve; });
+        if (id === 'broken') throw new Error('NotFoundError');
+      }
     };
     if (saved) localStorage.setItem('hm-audio-output', saved);
     if (webAudio) {
@@ -48,7 +52,7 @@ async function setup(page, options = {}) {
         async resume() {} async close() { this.state = 'closed'; }
       };
     }
-  }, { unsupported: options.unsupported ?? false, webAudio: options.webAudio ?? false, saved: options.saved ?? '' });
+  }, { unsupported: options.unsupported ?? false, webAudio: options.webAudio ?? false, saved: options.saved ?? '', holdRestore: options.holdRestore ?? false });
   await page.goto('/audio-test');
   await page.evaluate(async () => {
     const refresh = (await import('/@react-refresh')).default;
@@ -154,4 +158,14 @@ test('restores the chosen output and switches the loudness AudioContext together
   await select.selectOption('');
   await expect(select).toHaveValue('');
   expect(await page.evaluate(() => window.contextSinks.at(-1))).toBe('');
+});
+
+test('restores the output before sound starts and honours a pause while the device is opening', async ({ page }) => {
+  await setup(page, { saved: 'headphones', holdRestore: true });
+  expect(await page.evaluate(() => window.player.listenAudio().paused)).toBe(true);
+  await page.evaluate(() => { window.player.pause(); window.releaseOutput(); });
+  await expect.poll(() => page.evaluate(() => window.player.getListenState().phase)).toBe('paused');
+  expect(await page.evaluate(() => window.player.listenAudio().paused)).toBe(true);
+  await page.evaluate(() => window.player.toggle());
+  await expect.poll(() => page.evaluate(() => window.player.getListenState().phase)).toBe('playing');
 });

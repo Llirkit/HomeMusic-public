@@ -13,6 +13,7 @@ let audio: HTMLAudioElement | null = null;
 let listening = false;
 let refreshId = 0;
 let restoring: Promise<void> = Promise.resolve();
+export const audioOutputReady = () => restoring;
 const subscribe = (fn: () => void) => { subscribers.add(fn); return () => { subscribers.delete(fn); }; };
 const update = (patch: Partial<OutputState>) => { state = { ...state, ...patch }; subscribers.forEach(fn => fn()); };
 export const useAudioOutput = () => useSyncExternalStore(subscribe, () => state);
