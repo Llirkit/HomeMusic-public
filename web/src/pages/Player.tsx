@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Icon } from '../components/Icon';
 import { LikeButton } from '../components/LikeButton';
 import { LyricsButton } from '../components/Lyrics';
+import { AudioOutputButton } from '../components/AudioOutput';
 import { TrackMenuButton } from '../components/TrackMenu';
 import { Button, Cover, Empty, IconButton, Spinner, cx } from '../components/ui';
 import { fmtDuration, providerLabel } from '../lib/format';
@@ -203,6 +204,7 @@ export function PlayerPage() {
       )}
 
       <div className="px-6 pt-4"><LyricsButton /></div>
+      <div className="px-6 pt-3"><AudioOutputButton /></div>
       <Queue queue={queue} index={index} onWave={onWave} />
     </div>
   );

@@ -1,6 +1,14 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { hubURL, sameOrigin, playerState, EMPTY_STATE, thumbbar } = require('../src/contracts.cjs');
+const { hubURL, sameOrigin, audioOutputPermission, playerState, EMPTY_STATE, thumbbar } = require('../src/contracts.cjs');
+
+test('speaker access is scoped to the main Hub frame and never grants microphone access', () => {
+  const origin = 'https://music.example.ru';
+  assert.equal(audioOutputPermission('speaker-selection', origin, origin), true);
+  assert.equal(audioOutputPermission('speaker-selection', 'https://other.example', origin), false);
+  assert.equal(audioOutputPermission('speaker-selection', origin, origin, false), false);
+  assert.equal(audioOutputPermission('media', origin, origin), false);
+});
 
 test('Hub configuration allows HTTP(S) roots and rejects executable URLs, credentials and paths', () => {
   assert.equal(hubURL('http://localhost:8080/'), 'http://localhost:8080');

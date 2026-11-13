@@ -24,6 +24,7 @@ const PATHS = {
   upload: 'M12 20V9m0 0-4.5 4.5M12 9l4.5 4.5M5 5h14',
   note: 'M9 18V6l10-2v12M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm10-2a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
   volume: 'M4 9v6h4l5 4V5L8 9H4Zm12-1a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14',
+  speaker: 'M6 3h12v18H6V3Zm6 8a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm0-4h.01',
   play: 'M7 5v14l12-7L7 5Z',
   pause: 'M8 5v14M16 5v14',
   next: 'M6 5v14l9-7-9-7Zm12 0v14',

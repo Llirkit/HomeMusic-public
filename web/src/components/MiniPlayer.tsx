@@ -7,6 +7,7 @@ import { Link, enc } from '../lib/router';
 import { Icon } from './Icon';
 import { LikeButton } from './LikeButton';
 import { LyricsButton } from './Lyrics';
+import { AudioOutputButton } from './AudioOutput';
 import { TrackMenuButton } from './TrackMenu';
 import { Cover, IconButton, Spinner, cx } from './ui';
 
@@ -128,6 +129,7 @@ export function MiniPlayer() {
           )}
           <TrackMenuButton track={{ ...track, nd_song_id: info?.nd_song_id }} className="w-11" inPlayer />
           <LyricsButton compact />
+          <div className="hidden shrink-0 sm:block"><AudioOutputButton compact /></div>
           <LikeButton songId={info?.nd_song_id} refId={track.ref} title={track.title} data={{ ...track }} className="-mr-1" />
           <button
             type="button"

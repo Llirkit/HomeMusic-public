@@ -57,6 +57,15 @@ test('installed shell connects, synchronizes native buttons, sends commands whil
     await setup.getByRole('button', { name: 'Подключиться' }).click();
     const player = await windowPromise;
     await expect(player.getByRole('heading')).toHaveText('Хаб');
+    expect(await player.evaluate(async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(track => track.stop());
+        return false;
+      } catch { return true; }
+    })).toBe(true);
+    expect(await player.evaluate(async () => (await navigator.mediaDevices.enumerateDevices()).every(d =>
+      !d.label || d.kind === 'audiooutput'))).toBe(true);
     await expect.poll(() => setup.isClosed()).toBe(true);
     expect(JSON.parse(readFileSync(path.join(directory, 'config.json'), 'utf8')).url).toBe(url);
     expect(await player.evaluate(() => typeof window.require)).toBe('undefined');

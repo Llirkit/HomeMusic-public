@@ -4,6 +4,8 @@ import type { LaunchOrigin, ListenOut } from '../api/types';
 import { startDownload } from './actions';
 import { hubEvents } from './events';
 import { connectDesktopPlayer } from './desktopPlayer';
+import { clearAudioPreload, preloadAudio, takePreloadedAudio } from './audioPreload';
+import { attachAudioOutput } from './audioOutput';
 import { NATIVE_PLAYING_EVENT, canPlayAll, pauseNative, webPlayerShown } from './player';
 import { listeningAccount, newEventId, newLaunch, playEvent, routeContext, type Launch } from './plays';
 
@@ -151,6 +153,7 @@ export const listenAudio = (): HTMLAudioElement | null => audio;
 let pendingSeek = 0;
 let resolving: AbortController | null = null;
 let prefetching: { ref: string; ctl: AbortController } | null = null;
+let playingBlob: string | null = null;
 /** Seconds into a track after which ⏮ restarts it instead of going to the previous one. */
 const RESTART_AFTER_S = 3;
 /** Left after this share of a track: it counts as played to the end (`finish`), earlier — `skip`. */
@@ -301,6 +304,7 @@ function el(): HTMLAudioElement {
   const a = new Audio();
   a.preload = 'auto';
   a.volume = state.volume;
+  attachAudioOutput(a);
   const sync = () =>
     set({ position: pendingSeek || a.currentTime, duration: Number.isFinite(a.duration) && a.duration > 0 ? a.duration : state.duration });
   a.addEventListener('loadedmetadata', () => {
@@ -317,6 +321,7 @@ function el(): HTMLAudioElement {
     set({ phase: 'playing', error: null });
     refreshInfo();
     reportStart();
+    preloadUpcomingAudio();
     if (played?.started && played.anchor === null) played.anchor = performance.now();
   });
   const suspendClock = () => { if (played?.started) { accrue(played); played.anchor = null; checkpoint(); } };
@@ -325,6 +330,7 @@ function el(): HTMLAudioElement {
     if (played?.started && !a.paused && a.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) played.anchor = performance.now();
   });
   a.addEventListener('waiting', () => {
+    clearAudioPreload();
     suspendClock();
     if (state.phase === 'playing') set({ phase: 'loading' });
   });
@@ -369,7 +375,10 @@ function start(queue: readonly ListenTrack[], index: number, auto = false, posit
   resolving = ctl;
   pendingSeek = position;
   set({ track, queue, index, context: listContext, phase: autoplay ? 'resolving' : 'paused', info: null, error: null, position, duration: track.duration_s ?? 0 });
-  a.src = listenStreamUrl(track.ref);
+  const previousBlob = playingBlob;
+  playingBlob = takePreloadedAudio(track.ref);
+  a.src = playingBlob ?? listenStreamUrl(track.ref);
+  if (previousBlob) URL.revokeObjectURL(previousBlob);
   if (autoplay) play(a);
   else a.load();
   mediaSession(track);
@@ -408,13 +417,27 @@ function refreshInfo() {
 /** Asks the Hub to pick the next track's file now (it remembers the pick), so it starts at once. */
 function prefetchNext() {
   const nextTrack = state.queue[state.index + 1] ?? (state.repeat === 'all' && !onWave() ? state.queue[0] : undefined);
-  if (!nextTrack || prefetching?.ref === nextTrack.ref) return;
+  preloadUpcomingAudio();
+  if (!nextTrack) {
+    prefetching?.ctl.abort();
+    prefetching = null;
+    return;
+  }
+  if (prefetching?.ref === nextTrack.ref) return;
   prefetching?.ctl.abort();
   const ctl = new AbortController();
   prefetching = { ref: nextTrack.ref, ctl };
   api.listen(nextTrack.ref, ctl.signal).catch(() => {
     /* the track itself will show the error when it is reached */
   });
+}
+
+function preloadUpcomingAudio() {
+  const nextTrack = state.repeat === 'one' ? undefined : state.queue[state.index + 1] ??
+    (state.repeat === 'all' && !onWave() ? state.queue[0] : undefined);
+  // Never compete with initial playback or a stalled current file.
+  if (state.phase === 'playing') preloadAudio(nextTrack?.ref ?? null);
+  else clearAudioPreload();
 }
 
 // --- tracks on screen -------------------------------------------------------------------------------------
@@ -842,12 +865,15 @@ export function stopListening() {
   resolving = null;
   prefetching?.ctl.abort();
   prefetching = null;
+  clearAudioPreload();
   pendingSeek = 0;
   if (audio) {
     audio.pause();
     audio.removeAttribute('src');
     audio.load();
   }
+  if (playingBlob) URL.revokeObjectURL(playingBlob);
+  playingBlob = null;
   unshuffled = null;
   smartHooks?.end();
   set({ track: null, queue: [], index: 0, info: null, error: null, phase: 'paused', position: 0, duration: 0, smart: false });

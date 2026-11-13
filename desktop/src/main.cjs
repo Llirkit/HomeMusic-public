@@ -2,7 +2,7 @@ const { app, BrowserWindow, Menu, Notification, dialog, ipcMain, nativeTheme, sh
 const { readFileSync, writeFileSync, mkdirSync, renameSync } = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { APP_ID, CHANNELS, EMPTY_STATE, hubURL, sameOrigin, playerState, thumbbar } = require('./contracts.cjs');
+const { APP_ID, CHANNELS, EMPTY_STATE, hubURL, sameOrigin, audioOutputPermission, playerState, thumbbar } = require('./contracts.cjs');
 const { transportIcon } = require('./icons.cjs');
 const { attachTaskbar } = require('./taskbar.cjs');
 const { DesktopUpdates, updateMenu } = require('./updates.cjs');
@@ -99,6 +99,14 @@ function createPlayer(url) {
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), additionalArguments: [`--homemusic-origin=${url}`],
       contextIsolation: true, sandbox: true, nodeIntegration: false } });
   const win = mainWindow;
+  // Audio outputs belong only to the selected Hub. Selecting speakers never grants microphone capture.
+  const audioPermission = (contents, permission, requestingOrigin, mainFrame = true) =>
+    contents === mainWindow?.webContents && sameOrigin(contents.getURL(), origin) &&
+    audioOutputPermission(permission, requestingOrigin, origin, mainFrame);
+  win.webContents.session.setPermissionCheckHandler((contents, permission, requestingOrigin, details) =>
+    audioPermission(contents, permission, requestingOrigin, details.isMainFrame !== false));
+  win.webContents.session.setPermissionRequestHandler((contents, permission, callback, details) =>
+    callback(audioPermission(contents, permission, details.requestingUrl, details.isMainFrame !== false)));
   taskbar = process.platform === 'win32' ? attachTaskbar(win, () => thumbbar(state, icons, sendCommand)) : null;
   lockNavigation(win, (value) => sameOrigin(value, origin));
   win.on('page-title-updated', (event) => event.preventDefault());

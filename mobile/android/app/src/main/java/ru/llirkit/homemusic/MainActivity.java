@@ -196,6 +196,13 @@ public final class MainActivity extends Activity {
     web.addJavascriptInterface(
         new Object() {
           @JavascriptInterface
+          public void showAudioOutput() {
+            ui(() -> {
+              if (web != null && Identity.sameOrigin(base, web.getUrl())) showAudioOutputPicker();
+            });
+          }
+
+          @JavascriptInterface
           public void onWebPlaybackStarted() {
             ui(
                 () -> {
@@ -438,6 +445,7 @@ public final class MainActivity extends Activity {
       lyricsDialog.show();
     });
     playerBox.addView(lyricsButton);
+    playerBox.addView(button("Аудиовыход", v -> showAudioOutputPicker()));
     offline.addView(playerBox);
     refreshPlayer();
   }
@@ -817,6 +825,21 @@ public final class MainActivity extends Activity {
       startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
     } catch (Exception e) {
       toast("Не найден браузер для открытия ссылки");
+    }
+  }
+
+  private void showAudioOutputPicker() {
+    if (Build.VERSION.SDK_INT >= 34) {
+      try {
+        if (android.media.MediaRouter2.getInstance(this).showSystemOutputSwitcher()) return;
+      } catch (RuntimeException ignored) { /* Some devices do not supply the system switcher. */ }
+    }
+    try {
+      startActivity(new Intent(Build.VERSION.SDK_INT >= 29
+          ? android.provider.Settings.Panel.ACTION_VOLUME
+          : android.provider.Settings.ACTION_SOUND_SETTINGS));
+    } catch (ActivityNotFoundException e) {
+      toast("Выберите аудиовыход в настройках звука телефона");
     }
   }
 

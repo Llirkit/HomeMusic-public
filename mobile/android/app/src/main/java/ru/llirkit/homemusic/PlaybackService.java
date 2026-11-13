@@ -14,6 +14,8 @@ public final class PlaybackService extends MediaSessionService {
   public void onCreate() {
     super.onCreate();
     ExoPlayer player = new ExoPlayer.Builder(this).build();
+    // Load the next item's first ten seconds only after the current item's buffer is satisfied.
+    player.setPreloadConfiguration(new ExoPlayer.PreloadConfiguration(10_000_000L));
     player.setAudioAttributes(
         new AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)

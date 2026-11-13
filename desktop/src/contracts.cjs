@@ -14,6 +14,10 @@ function sameOrigin(value, origin) {
   try { return !!origin && new URL(value).origin === origin; } catch { return false; }
 }
 
+function audioOutputPermission(permission, requestingOrigin, origin, mainFrame = true) {
+  return mainFrame && permission === 'speaker-selection' && sameOrigin(requestingOrigin, origin);
+}
+
 function playerState(value) {
   if (!value || typeof value !== 'object' ||
       !['active', 'playing', 'canNext', 'canPrevious'].every((key) => typeof value[key] === 'boolean') ||
@@ -33,4 +37,4 @@ function thumbbar(state, icons, send) {
   ];
 }
 
-module.exports = { APP_ID, CHANNELS, EMPTY_STATE, hubURL, sameOrigin, playerState, thumbbar };
+module.exports = { APP_ID, CHANNELS, EMPTY_STATE, hubURL, sameOrigin, audioOutputPermission, playerState, thumbbar };
