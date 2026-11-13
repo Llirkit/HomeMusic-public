@@ -1227,7 +1227,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<boolea
     const sort = url.searchParams.get('sort') ?? 'artist';
     const offset = Number(url.searchParams.get('offset') ?? 0);
     const limit = Number(url.searchParams.get('limit') ?? 50);
-    const rows = libTracks.filter((t) => !q || `${t.artist} ${t.title} ${t.album ?? ''}`.toLowerCase().includes(q));
+    const rows = libTracks.map(libTrackOut).filter((t) => !q || `${t.artist} ${t.title} ${t.album ?? ''}`.toLowerCase().includes(q));
     rows.sort((a, b) => {
       if (sort === 'title') return a.title.localeCompare(b.title, 'ru') || a.artist.localeCompare(b.artist, 'ru');
       if (sort === 'album') return String(a.album ?? '').localeCompare(String(b.album ?? ''), 'ru') || (a.track_no ?? 0) - (b.track_no ?? 0);

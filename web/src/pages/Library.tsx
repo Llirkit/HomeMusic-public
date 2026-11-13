@@ -10,7 +10,7 @@ import { fmtDuration, recordTypeLabel, toIntOrNull, tracksWord } from '../lib/fo
 import { useAsync, useDebounced } from '../lib/hooks';
 import { Link, navigate } from '../lib/router';
 import { attempt } from '../lib/ui';
-import { listen, listenAll, type ListenTrack } from '../lib/listen';
+import { listen, type ListenTrack } from '../lib/listen';
 import { canPlay, playList } from '../lib/player';
 
 const PAGE = 50;
@@ -34,13 +34,19 @@ export function LibraryPage({ initialQuery }: { initialQuery: string }) {
   useEffect(() => {
     setExtra([]);
     setMore({ busy: false, done: false });
-    setTrackExtra([]);
-    setTrackMore({ busy: false, done: false });
     const target = withQuery('/library', { q: dq });
     if (window.location.hash !== '#' + target) navigate(target, { replace: true });
   }, [dq]);
 
-  useHubEvent('library', () => res.reload(true));
+  useEffect(() => {
+    setTrackExtra([]);
+    setTrackMore({ busy: false, done: false });
+  }, [dq, trackSort]);
+
+  useHubEvent('library', () => {
+    res.reload(true);
+    trackRes.reload(true);
+  });
 
   const albums = [...(res.data ?? []), ...extra];
   const tracks = [...(trackRes.data ?? []), ...trackExtra];

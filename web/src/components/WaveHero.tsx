@@ -37,7 +37,7 @@ export function WaveHero() {
         cover={cover}
         center={[0.5, 0.5]}
         zoom={0.9}
-        className="pointer-events-none absolute inset-y-0 left-1/2 w-[min(1100px,calc(100vw-32px))] -translate-x-1/2"
+        className="pointer-events-none absolute inset-y-0 left-1/2 w-full max-w-[1100px] -translate-x-1/2"
         style={{ maskImage: fade, WebkitMaskImage: fade }}
       />
       <div className="relative flex flex-col items-center text-center text-white" style={{ textShadow: '0 1px 14px rgba(0,0,0,.6)' }}>
