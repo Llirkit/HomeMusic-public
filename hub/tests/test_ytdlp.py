@@ -696,8 +696,9 @@ PROXY = "http://proxy.test:3128"
     ({"api.deezer.com"}, None, None),
     ({"music.youtube.com"}, PROXY, None),
     ({"*.sndcdn.com"}, None, PROXY),
+    ({"*.soundcloud.cloud"}, None, PROXY),
     ({"youtube.com", "soundcloud.com"}, PROXY, PROXY),
-], ids=["catalog-only", "youtube", "soundcloud-cdn", "both"])
+], ids=["catalog-only", "youtube", "soundcloud-cdn", "soundcloud-cloud-cdn", "both"])
 def test_ytdlp_proxy_is_selected_per_provider(monkeypatch, hosts, youtube, soundcloud):
     from app.providers.reuploads import SoundcloudProvider
 

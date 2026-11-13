@@ -56,7 +56,7 @@ LISTEN_FORMAT = "bestaudio[ext=m4a]/bestaudio/best"
 _MEDIA_TYPES = {"m4a": "audio/mp4", "mp4": "audio/mp4", "webm": "audio/webm", "mp3": "audio/mpeg", "ogg": "audio/ogg"}
 STREAM_URL_TTL_S = 20 * 60  # audio URLs from a metadata lookup, reused by `stream` (googlevideo links live ~6 h)
 YOUTUBE_PROXY_DOMAINS = ("youtube.com", "youtu.be", "googlevideo.com", "youtube-nocookie.com")
-SOUNDCLOUD_PROXY_DOMAINS = ("soundcloud.com", "sndcdn.com")
+SOUNDCLOUD_PROXY_DOMAINS = ("soundcloud.com", "sndcdn.com", "soundcloud.cloud")
 MEDIA_HOST_SUFFIX = ".googlevideo.com"
 MEDIA_PROBE_TIMEOUT_S = 5.0
 MEDIA_PROBE_TTL_S = 10 * 60  # how long a media server's probe result is trusted
