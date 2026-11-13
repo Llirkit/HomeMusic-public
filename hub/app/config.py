@@ -158,6 +158,7 @@ class Settings(BaseSettings):
 
     music_root: Path = Path("/music")
     data_dir: Path = Path("/data")
+    android_releases_dir: Path | None = None
     config_file: Path = Path("/config/config.yaml")
     static_dir: Path = Path(__file__).parent / "static"
 

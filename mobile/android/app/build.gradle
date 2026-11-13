@@ -1,0 +1,40 @@
+plugins { id 'com.android.application' }
+
+def signingFile = System.getenv('HOMEMUSIC_SIGNING_PROPERTIES')
+def signing = new Properties()
+if (signingFile) { file(signingFile).withInputStream { signing.load(it) } }
+android {
+    namespace 'ru.llirkit.homemusic'
+    compileSdk 36
+    defaultConfig {
+        applicationId 'ru.llirkit.homemusic'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '1.0.0'
+        buildConfigField 'String', 'SERVER_URL', '"https://spotik.llirkit.ru"'
+    }
+    buildFeatures { buildConfig true }
+    signingConfigs {
+        release {
+            if (signingFile) {
+                storeFile file(signing.getProperty('storeFile'))
+                storePassword signing.getProperty('storePassword')
+                keyAlias signing.getProperty('keyAlias')
+                keyPassword signing.getProperty('keyPassword')
+            }
+        }
+    }
+    buildTypes {
+        debug { if (signingFile) { signingConfig signingConfigs.release } }
+        release { signingConfig signingConfigs.release; minifyEnabled false }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    lint { abortOnError true }
+}
+dependencies {
+    implementation 'androidx.media3:media3-exoplayer:1.11.1'
+    implementation 'androidx.media3:media3-session:1.11.1'
+    implementation 'androidx.work:work-runtime:2.12.0'
+    testImplementation 'junit:junit:4.13.2'
+}

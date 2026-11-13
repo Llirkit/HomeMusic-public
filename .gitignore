@@ -31,7 +31,7 @@ design-review/shots/
 *.log
 
 # Android app: separate git repo (fork of Tempus), see android/ README
-android/
+/android/
 
 # Agent instructions and journals are kept out of the public repository
 CLAUDE.md

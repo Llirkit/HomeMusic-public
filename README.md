@@ -4,7 +4,7 @@
 поиск, скачивание, загрузка своих файлов и ИИ-ассистент — свой сервис **Хаб** (FastAPI + PWA).
 API Хаба — [hub/API.md](hub/API.md).
 
-**Скачать Android-приложение:** [HomeMusic.apk](https://github.com/justman-1/HomeMusic-public/releases/latest/download/HomeMusic.apk)
+**Скачать Android-приложение:** [HomeMusic.apk](https://spotik.llirkit.ru/app/latest.apk)
 (все версии — [Releases](https://github.com/justman-1/HomeMusic-public/releases)). Приложению нужен свой сервер HomeMusic:
 вход только по приглашению его владельца.
 
@@ -62,7 +62,12 @@ API Хаба — [hub/API.md](hub/API.md).
    - **Хаб**: открыть `https://203.0.113.10:8445` в Chrome → меню → «Установить приложение». После этого Хаб есть
      в меню «Поделиться» Android: скриншот → ассистент, аудиофайл → загрузка в библиотеку.
 
-## Android-приложение HomeMusic (форк Tempus)
+## Android-приложение этой установки
+
+Новый клиент с актуальной веб-версией и нативным офлайн-плеером: [исходники и сборка](mobile/android/README.md).
+Скачать APK можно в веб-версии: **Ещё → Приложение для Android**.
+
+## Предыдущий Android-клиент (Tempus, справка upstream)
 
 Исходники — `android/` (отдельный git-репозиторий, ветка `homemusic`; в этот репозиторий не входит). Это Tempus с вкладкой
 «Хаб» (Каталог, Загрузки, Ассистент, Мои файлы), «Поделиться» → Хаб, уведомлениями ассистента и обновлениями из Хаба.

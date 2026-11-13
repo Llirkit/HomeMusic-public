@@ -8,6 +8,27 @@ from fastapi import FastAPI
 from app.api import system
 
 
+@pytest.mark.asyncio
+async def test_android_release_can_be_served_from_ssd_without_music_disk(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from app import config
+
+    directory = tmp_path / "ssd-releases"
+    directory.mkdir()
+    monkeypatch.setattr(config, "get_settings", lambda: SimpleNamespace(
+        android_releases_dir=directory, music_root=tmp_path / "unavailable-music-disk"))
+    (directory / "HomeMusic-1.0.0-1.apk").write_bytes(b"signed-release")
+    (directory / "latest.json").write_text(json.dumps({"file": "HomeMusic-1.0.0-1.apk", "versionCode": 1}))
+    app = FastAPI()
+    app.include_router(system.router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://test") as client:
+        response = await client.get("/app/latest.apk")
+        assert response.status_code == 200 and response.content == b"signed-release"
+        assert response.headers["content-type"] == "application/vnd.android.package-archive"
+        assert (await client.get("/app/latest.json")).json()["versionCode"] == 1
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(system, "_apk_dir", lambda: tmp_path)
@@ -100,7 +121,7 @@ async def test_patch_not_smaller_than_the_apk_is_dropped(client, tmp_path):
 
 @pytest.mark.asyncio
 async def test_full_that_disagrees_with_the_legacy_fields_hides_all_new_metadata(client, tmp_path):
-    _, full, _ = _publish(tmp_path, manifest_overrides={"sha256": "b" * 64})
+    _, _full, _ = _publish(tmp_path, manifest_overrides={"sha256": "b" * 64})
     async with client:
         data = (await client.get("/app/latest.json")).json()
         legacy = await client.get("/app/latest.apk")

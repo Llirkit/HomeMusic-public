@@ -109,7 +109,8 @@ async def share_target(request: Request, s: AsyncSession = Depends(get_session, 
 def _apk_dir():
     from app.config import get_settings
 
-    return get_settings().music_root / ".apk"
+    settings = get_settings()
+    return settings.android_releases_dir or settings.music_root / ".apk"
 
 
 _ARTIFACT = re.compile(r"^(apk|patch)-([0-9a-f]{64})\.(apk|bsdiff)$")
@@ -205,7 +206,6 @@ async def apk_file():
 async def apk_artifact(name: str):
     from fastapi import HTTPException
     from fastapi.responses import FileResponse
-
     from starlette.concurrency import run_in_threadpool
 
     path = await run_in_threadpool(_artifact, name, verify=True)
