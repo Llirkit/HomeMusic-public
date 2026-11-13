@@ -72,3 +72,43 @@ async def test_background_job_runs_with_background_network_priority(db):
         queue._handlers.pop("test_probe", None)
     assert seen == [(0, False), (queue.PRIORITY_IMPORT, True)]
     assert not in_background()  # the worker itself is back to the foreground
+
+
+@pytest.mark.parametrize("handler_fails", [False, True])
+async def test_busy_completion_retries_status_without_rerunning_handler(db, monkeypatch, handler_fails):
+    import sqlite3
+
+    from sqlalchemy.exc import OperationalError
+
+    calls = []
+    writes = []
+    original = queue._finish_once
+
+    @queue.handler("test_busy_finish")
+    async def perform(job):
+        calls.append(job.id)
+        if handler_fails:
+            raise ValueError("source unavailable")
+
+    async def busy_twice(*args, **kwargs):
+        writes.append(args[0])
+        if len(writes) < 3:
+            raise OperationalError("UPDATE jobs", {}, sqlite3.OperationalError("database is locked"))
+        await original(*args, **kwargs)
+
+    monkeypatch.setattr(queue, "_finish_once", busy_twice)
+    try:
+        jid = await _add("test_busy_finish", queue.PRIORITY_IMPORT)
+        job = await queue._claim("test")
+        await queue.run_job(job)
+        assert calls == [jid] and writes == [jid] * 3
+        async with session_scope() as s:
+            result = await s.get(Job, jid)
+            assert result.status == ("queued" if handler_fails else "done")
+            assert result.locked_at is None and result.locked_by is None
+            assert result.attempts == 1
+        # A returned status releases the background slot for the rest of the queue.
+        await _add("next", queue.PRIORITY_IMPORT)
+        assert await _claimed() == "next"
+    finally:
+        queue._handlers.pop("test_busy_finish", None)

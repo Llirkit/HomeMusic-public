@@ -245,8 +245,16 @@ async def sync(mix_id: int) -> bool:
                                       .order_by(MixItem.position))).scalars())
         dl_ids = [i.download_item_id for i in items if i.download_item_id]
         dls = {d.id: d for d in (await s.execute(select(DownloadItem).where(DownloadItem.id.in_(dl_ids)))).scalars()}
+        closed = set((await s.execute(select(Mix.id).where(Mix.status == "closed"))).scalars())
         for it in items:
             dl = dls.get(it.download_item_id) if it.download_item_id else None
+            # Older versions cancelled downloads shared with the replacement mix when closing their origin.
+            # Repair only quiet downloads of closed mixes; explicit user cancellations stay cancelled.
+            if (dl is not None and dl.status == "cancelled" and quiet(dl.query_json)
+                    and ((dl.query_json or {}).get("mix") or {}).get("id") in closed
+                    and it.state in ("active", "reserve")):
+                it.download_item_id = None
+                dl = None
             if dl is not None and dl.status == "done" and dl.track_id:
                 it.track_id = dl.track_id
             if it.track_id and not it.nd_song_id:
@@ -338,7 +346,10 @@ async def close_previous(user_id: int, new_mix_id: int) -> None:
                 DownloadItem.status == "queued",
                 func.json_extract(DownloadItem.query_json, "$.mix.id").in_([m.id for m in old])))).scalars()
             for d in queued:
-                if quiet(d.query_json):
+                shared = (await s.execute(select(MixItem.id).join(Mix, Mix.id == MixItem.mix_id).where(
+                    Mix.status == "active", MixItem.state.in_(("active", "reserve")),
+                    MixItem.download_item_id == d.id).limit(1))).scalar_one_or_none()
+                if quiet(d.query_json) and shared is None:
                     d.status = "cancelled"
     await remove_unheard(await pending_cleanup(user_id))
 
@@ -427,9 +438,14 @@ async def remove_unheard(mix_ids: list[int]) -> int:
     starred, listed = keep
     removed = 0
     async with session_scope() as s:
-        items = list((await s.execute(select(MixItem).where(
+        item_ids = list((await s.execute(select(MixItem.id).where(
             MixItem.mix_id.in_(mix_ids), MixItem.downloaded_for_mix.is_(True)))).scalars())
-        for it in items:
+    # Each decision is independent. Do not hold SQLite's writer lock while moving an entire old playlist on disk.
+    for item_id in item_ids:
+        async with session_scope() as s:
+            it = await s.get(MixItem, item_id)
+            if it is None:
+                continue
             if (it.features_json or {}).get("cleanup"):
                 continue
             dl = await s.get(DownloadItem, it.download_item_id) if it.download_item_id else None
@@ -451,7 +467,8 @@ async def remove_unheard(mix_ids: list[int]) -> int:
                 verdict = "trashed"
                 removed += 1
             it.features_json = {**(it.features_json or {}), "cleanup": verdict}
-        if removed:
+    if removed:
+        async with session_scope() as s:
             await enqueue_scan(s)
     if removed:
         notify()

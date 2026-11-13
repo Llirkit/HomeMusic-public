@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import text, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -121,6 +122,23 @@ async def _claim(worker_id: str) -> Job | None:
 
 
 async def _finish(job_id: int, *, ok: bool, error: str | None = None, retry_in: float | None = None) -> None:
+    # Losing a completion write must not kill a worker and leave its job occupying a background slot forever.
+    # Retry the bookkeeping only: a successful handler may have already imported a file or changed a playlist.
+    delay = 0.1
+    while True:
+        try:
+            await _finish_once(job_id, ok=ok, error=error, retry_in=retry_in)
+            return
+        except OperationalError as exc:
+            code = getattr(exc.orig, "sqlite_errorcode", 0)
+            if (code & 0xff) not in (5, 6) and "database is locked" not in str(exc.orig).lower():
+                raise
+            log.warning("job %s: database busy saving its result; retrying the status write", job_id)
+            await asyncio.sleep(delay)
+            delay = min(5.0, delay * 2)
+
+
+async def _finish_once(job_id: int, *, ok: bool, error: str | None, retry_in: float | None) -> None:
     async with session_scope() as s:
         job = await s.get(Job, job_id)
         if job is None:

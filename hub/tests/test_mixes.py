@@ -522,6 +522,61 @@ async def test_next_mix_keeps_the_playlist_and_closes_the_old_one(env, monkeypat
     assert second.nd_playlist_id == first.nd_playlist_id and len(env["nd"].playlists) == 1
 
 
+async def test_replacement_keeps_shared_downloads_and_repairs_legacy_cancellations(env, monkeypatch) -> None:
+    from app.db import session_scope
+    from app.mixes import core
+    from app.models import DownloadItem
+
+    me = env["admin"]
+    await history(me)
+    fake_generators(monkeypatch, [new_track(5000 + i) for i in range(10)])
+    first = await core.build_for(me)
+    first_downloads = {r.download_item_id for r in await mix_rows(first.id) if r.download_item_id}
+    second = await core.build_for(me)
+    second_downloads = {r.download_item_id for r in await mix_rows(second.id) if r.download_item_id}
+    shared = first_downloads & second_downloads
+    assert shared
+    async with session_scope() as s:
+        for did in shared:
+            dl = await s.get(DownloadItem, did)
+            assert dl.status == "queued"
+            dl.status = "cancelled"  # reproduce the previous version's close_previous bug
+    await core.sync(second.id)
+    restored = [r for r in await mix_rows(second.id) if r.state == "active" and r.download_item_id]
+    assert not any(r.download_item_id in shared for r in restored)
+    assert len(restored) == len(second_downloads)
+    async with session_scope() as s:
+        for row in restored:
+            assert (await s.get(DownloadItem, row.download_item_id)).status == "queued"
+
+
+async def test_old_mix_cleanup_commits_each_song_before_moving_the_next(env, monkeypatch) -> None:
+    from app.db import session_scope
+    from app.library import editor
+    from app.mixes import core
+    from app.models import MixItem
+
+    ids = []
+    for n in (7, 8):
+        tid = await add_track(n, music=env["music"])
+        ids.append(await old_mix_with(env["admin"], tid, ref=f"dz:{n}"))
+    original = editor.trash_track
+    calls = []
+
+    async def move(s, track):
+        if calls:
+            # An independent reader must see the previous decision, even while cleanup continues.
+            async with session_scope() as reader:
+                first = (await reader.execute(select(MixItem).where(MixItem.mix_id == ids[0]))).scalar_one()
+                assert first.features_json["cleanup"] == "trashed"
+        calls.append(track.id)
+        await original(s, track)
+
+    monkeypatch.setattr(editor, "trash_track", move)
+    assert await core.remove_unheard(ids) == 2
+    assert len(calls) == 2
+
+
 async def test_no_history_no_mix(env) -> None:
     from app.mixes import core
 
