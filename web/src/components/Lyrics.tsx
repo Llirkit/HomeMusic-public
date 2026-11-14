@@ -16,14 +16,14 @@ interface LyricsOut {
 }
 
 /** Один экран для браузера, Electron и онлайн-плеера Android. */
-export function LyricsButton({ compact = false }: { compact?: boolean }) {
+export function LyricsButton({ compact = false, small = false }: { compact?: boolean; small?: boolean }) {
   const [open, setOpen] = useState(false);
   const track = useListen((s) => s.track);
   return <>
     {compact ? (
       <IconButton icon="lyrics" label="Текст песни" onClick={() => setOpen(true)} />
     ) : (
-      <Button icon="lyrics" block onClick={() => setOpen(true)}>Текст песни</Button>
+      <Button icon="lyrics" aria-label="Текст песни" small={small} variant={small ? 'ghost' : 'secondary'} block={!small} onClick={() => setOpen(true)}>{small ? 'Текст' : 'Текст песни'}</Button>
     )}
     {open && track && <LyricsDialog onClose={() => setOpen(false)} />}
   </>;

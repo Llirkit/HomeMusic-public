@@ -195,16 +195,15 @@ export function PlayerPage() {
         />
       </div>
 
-      {canWave() && waveSeed && (
-        <div className="px-6 pt-4">
-          <Button icon="wave" block disabled={starting !== null} busy={starting === seedKey(waveSeed)} onClick={() => void startWave(waveSeed, 'player')}>
-            Моя волна по треку
+      <div className="flex flex-wrap items-center justify-center gap-2 px-4 pt-4" role="group" aria-label="Действия с треком">
+        {canWave() && waveSeed && (
+          <Button icon="wave" small variant="ghost" aria-label="Моя волна по треку" disabled={starting !== null} busy={starting === seedKey(waveSeed)} onClick={() => void startWave(waveSeed, 'player')}>
+            Волна
           </Button>
-        </div>
-      )}
-
-      <div className="px-6 pt-4"><LyricsButton /></div>
-      <div className="px-6 pt-3"><AudioOutputButton /></div>
+        )}
+        <LyricsButton small />
+        <AudioOutputButton small />
+      </div>
       <Queue queue={queue} index={index} onWave={onWave} />
     </div>
   );
@@ -219,25 +218,40 @@ function contextLabel(context: string): string {
 }
 
 function Queue({ queue, index, onWave }: { queue: readonly ListenTrack[]; index: number; onWave: boolean }) {
+  const [expanded, setExpanded] = useState(true);
+  const scroll = useRef<HTMLDivElement>(null);
   const current = useRef<HTMLLIElement>(null);
   const upcoming = queue.length - index - 1;
-  // the current track's row in view once, not on every change of the queue
+  const currentRef = queue[index]?.ref;
+  // Scroll only this panel. Manual browsing stays put until playback changes or the panel reopens.
   useEffect(() => {
-    current.current?.scrollIntoView({ block: 'nearest' });
-  }, []);
+    const panel = scroll.current;
+    const row = current.current;
+    if (expanded && panel && row) panel.scrollTop = row.offsetTop;
+  }, [expanded, index, currentRef]);
 
   return (
-    <section aria-label="Очередь" className="mt-6 flex-1 rounded-t-2xl bg-surface pb-[calc(16px+env(safe-area-inset-bottom))]">
-      <div className="flex items-center justify-between px-4 pb-1 pt-4">
-        <h2 className="text-lg font-bold">Далее</h2>
-        <span className="text-xs text-muted">{onWave ? 'Подбирается на ходу' : upcoming > 0 ? `${upcoming} в очереди` : 'Очередь закончится на этом треке'}</span>
-      </div>
-      <ul>
+    <section aria-label="Очередь" className="mt-4 rounded-t-2xl bg-surface pb-[calc(16px+env(safe-area-inset-bottom))]">
+      <h2>
+        <button type="button" aria-expanded={expanded} aria-controls="player-queue" onClick={() => setExpanded(!expanded)}
+          className="flex min-h-14 w-full items-center gap-3 rounded-t-2xl px-4 py-3 text-left hover:bg-fg/5">
+          <span className="min-w-0 flex-1">
+            <span className="block text-base font-bold">Далее</span>
+            <span className="block text-xs font-normal text-muted">{onWave ? 'Подбирается на ходу' : upcoming > 0 ? `${upcoming} в очереди` : 'Очередь закончится на этом треке'}</span>
+          </span>
+          <span className="text-xs font-normal text-muted">{expanded ? 'Свернуть' : 'Развернуть'}</span>
+          <Icon name="down" size={18} className={expanded ? 'rotate-180' : ''} />
+        </button>
+      </h2>
+      <div id="player-queue" ref={scroll} hidden={!expanded} role="region" aria-label="Список треков" tabIndex={0}
+        className="relative h-[min(40dvh,22rem)] overflow-y-auto overscroll-contain [overflow-anchor:none]">
+      <ul className="min-h-full after:block after:h-[max(0px,calc(min(40dvh,22rem)-64px))] after:content-['']">
         {queue.map((t, i) => (
           <li
             key={`${t.ref}:${i}`}
             ref={i === index ? current : undefined}
-            className={cx('flex min-h-14 items-center gap-3 pl-4 pr-1', i < index && 'opacity-50', i === index && 'bg-fg/5')}
+            aria-current={i === index ? 'true' : undefined}
+            className={cx('flex min-h-16 items-center gap-1 pl-3 pr-1', i < index && 'opacity-50', i === index && 'bg-fg/5')}
           >
             <button type="button" onClick={() => playQueueAt(i)} className="flex min-w-0 flex-1 items-center gap-3 py-1.5 text-left" aria-label={`Слушать «${t.title}»`}>
               <Cover src={t.cover_small_url || t.cover_url} size={40} alt="" />
@@ -253,12 +267,14 @@ function Queue({ queue, index, onWave }: { queue: readonly ListenTrack[]; index:
                 </span>
               </span>
             </button>
-            {i > index + 1 && <IconButton icon="back" label="Поднять выше" onClick={() => moveInQueue(i, i - 1)} size={18} className="w-9 rotate-90 text-muted" />}
-            {i !== index && <IconButton icon="x" label="Убрать из очереди" onClick={() => removeFromQueue(i)} size={18} className="w-9 text-muted" />}
-            <TrackMenuButton track={t} className="w-9" inPlayer />
+            <LikeButton songId={t.nd_song_id} refId={t.ref} title={t.title} data={{ ...t }} size={19} />
+            {i > index + 1 && <IconButton icon="back" label="Поднять выше" onClick={() => moveInQueue(i, i - 1)} size={18} className="rotate-90 text-muted" />}
+            {i !== index && <IconButton icon="x" label="Убрать из очереди" onClick={() => removeFromQueue(i)} size={18} className="text-muted" />}
+            <TrackMenuButton track={t} inPlayer />
           </li>
         ))}
       </ul>
+      </div>
     </section>
   );
 }

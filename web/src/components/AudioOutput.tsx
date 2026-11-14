@@ -4,12 +4,12 @@ import { hasNativeAudioOutput, hasOutputPicker, refreshAudioOutputs, requestAudi
   showNativeAudioOutput, supportsAudioOutput, useAudioOutput } from '../lib/audioOutput';
 import { Button, IconButton, Sheet } from './ui';
 
-export function AudioOutputButton({ compact = false }: { compact?: boolean }) {
+export function AudioOutputButton({ compact = false, small = false }: { compact?: boolean; small?: boolean }) {
   const [open, setOpen] = useState(false);
   const onClick = () => hasNativeAudioOutput() ? showNativeAudioOutput() : setOpen(true);
   return <>
     {compact ? <IconButton icon="speaker" label="Аудиовыход" onClick={onClick} /> :
-      <Button icon="speaker" block onClick={onClick}>Аудиовыход</Button>}
+      <Button icon="speaker" small={small} variant={small ? 'ghost' : 'secondary'} block={!small} onClick={onClick}>Аудиовыход</Button>}
     {open && createPortal(<AudioOutputSheet onClose={() => setOpen(false)} />, document.body)}
   </>;
 }
