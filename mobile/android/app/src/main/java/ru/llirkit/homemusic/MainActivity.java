@@ -142,6 +142,9 @@ public final class MainActivity extends Activity {
           try {
             if (isDestroyed()) return;
             controller = controllerFuture.get();
+            if (PlaybackService.current != null) PlaybackService.current.onlineListener =
+                json -> { if (web != null && Identity.sameOrigin(base, web.getUrl()))
+                  web.evaluateJavascript("window.hmAndroidPlayback && window.hmAndroidPlayback(" + json + ")", null); };
             controller.addListener(
                 new Player.Listener() {
                   @Override
@@ -193,6 +196,13 @@ public final class MainActivity extends Activity {
     // Keep the web navigation/player visible: this client does not use the legacy Tempus JS bridge.
     s.setUserAgentString(s.getUserAgentString() + " HomeMusicMobile/" + BuildConfig.VERSION_NAME);
     CookieManager.getInstance().setAcceptThirdPartyCookies(web, false);
+    web.addJavascriptInterface(
+        new Object() {
+          @JavascriptInterface public void command(String json) {
+            if (json == null || json.length() > 2 * 1024 * 1024) return;
+            ui(() -> dispatchOnline(json, 0));
+          }
+        }, "SpotikPlayback");
     web.addJavascriptInterface(
         new Object() {
           @JavascriptInterface
@@ -282,6 +292,26 @@ public final class MainActivity extends Activity {
           if (Identity.sameOrigin(base, u)) openExternal(u);
         });
     WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
+  }
+
+  private void dispatchOnline(String json, int attempts) {
+    if (isFinishing() || isDestroyed() || !Identity.sameOrigin(base, web.getUrl())) return;
+    if (PlaybackService.current == null && attempts < 50) {
+      handler.postDelayed(() -> dispatchOnline(json, attempts + 1), 100);
+      return;
+    }
+    try {
+      JSONObject message = new JSONObject(json);
+      if (PlaybackService.current == null) throw new IllegalArgumentException("Плеер недоступен");
+      PlaybackService.current.onlineCommand(message);
+    } catch (JSONException | IllegalArgumentException e) {
+      try {
+        String id = new JSONObject(json).optString("id");
+        web.evaluateJavascript("window.hmAndroidPlayback && window.hmAndroidPlayback(" +
+            new JSONObject().put("id", id).put("state", -2) + ")", null);
+      } catch (JSONException ignored) { }
+      toast("Не удалось запустить плеер. Попробуйте ещё раз");
+    }
   }
 
   private void createOffline() {
@@ -459,7 +489,7 @@ public final class MainActivity extends Activity {
     if (playButton == null) return;
     boolean loaded = controller != null && controller.getCurrentMediaItem() != null;
     playButton.setEnabled(loaded);
-    lyricsButton.setEnabled(loaded);
+    lyricsButton.setEnabled(loaded && (PlaybackService.current == null || !PlaybackService.current.isOnline()));
     previousButton.setEnabled(loaded && controller.hasPreviousMediaItem());
     nextButton.setEnabled(loaded && controller.hasNextMediaItem());
     if (!loaded) {
@@ -541,7 +571,7 @@ public final class MainActivity extends Activity {
     ui(
         () -> {
           if (!base.equals(server)) return;
-          if (!owner.equals(verified) && controller != null) {
+          if (!owner.equals(verified) && controller != null && (PlaybackService.current == null || !PlaybackService.current.isOnline())) {
             if (lyricsDialog != null) lyricsDialog.dismiss();
             controller.pause();
             controller.clearMediaItems();
@@ -558,6 +588,7 @@ public final class MainActivity extends Activity {
           owner = "";
           if (lyricsDialog != null) lyricsDialog.dismiss();
           prefs.edit().remove("owner").remove("username").apply();
+          if (PlaybackService.current != null) PlaybackService.current.stopOnline();
           if (controller != null) {
             controller.pause();
             controller.clearMediaItems();
@@ -733,6 +764,7 @@ public final class MainActivity extends Activity {
       toast("Плеер подключается. Повторите через секунду");
       return;
     }
+    if (PlaybackService.current != null) PlaybackService.current.stopOnline();
     web.evaluateJavascript(
         "document.querySelectorAll('audio,video').forEach(function(x){x.pause()})", null);
     List<MediaItem> queue = new ArrayList<>();
@@ -770,7 +802,7 @@ public final class MainActivity extends Activity {
         .setPositiveButton(
             "Удалить",
             (d, w) -> {
-              if (controller != null) {
+              if (controller != null && (PlaybackService.current == null || !PlaybackService.current.isOnline())) {
                 controller.pause();
                 controller.clearMediaItems();
               }
@@ -882,7 +914,7 @@ public final class MainActivity extends Activity {
   protected void onNewIntent(Intent intent) {
     super.onNewIntent(intent);
     setIntent(intent);
-    if (intent.getBooleanExtra("offline", false)) showOffline(true);
+    showOffline(intent.getBooleanExtra("offline", false));
   }
 
   @Override
@@ -922,6 +954,7 @@ public final class MainActivity extends Activity {
 
   @Override
   protected void onDestroy() {
+    if (PlaybackService.current != null) PlaybackService.current.onlineListener = null;
     if (lyricsDialog != null) lyricsDialog.dismiss();
     handler.removeCallbacks(tick);
     if (files != null) files.onReceiveValue(null);

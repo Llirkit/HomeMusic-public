@@ -14,17 +14,27 @@ final class Api {
   }
 
   static HttpURLConnection open(String base, String path) throws IOException {
+    return open(base, path, null, 30000);
+  }
+
+  static HttpURLConnection open(String base, String path, String range, int timeout) throws IOException {
+    return open(base, path, range, timeout, false);
+  }
+
+  static HttpURLConnection open(String base, String path, String range, int timeout, boolean ahead) throws IOException {
     String address = base + path;
     for (int n = 0; n < 4; n++) {
       if (!Identity.sameOrigin(base, address))
         throw new IOException("Сервер перенаправил запрос на другой адрес");
       HttpURLConnection c = (HttpURLConnection) new URL(address).openConnection();
       c.setConnectTimeout(15000);
-      c.setReadTimeout(30000);
+      c.setReadTimeout(timeout);
       c.setInstanceFollowRedirects(false);
       String cookie = CookieManager.getInstance().getCookie(base);
       if (cookie != null) c.setRequestProperty("Cookie", cookie);
       c.setRequestProperty("User-Agent", "HomeMusicOffline/" + BuildConfig.VERSION_NAME);
+      if (range != null) c.setRequestProperty("Range", range);
+      if (ahead) c.setRequestProperty("X-HomeMusic-Prefetch", "1");
       int status = c.getResponseCode();
       if (status == 401 || status == 403) {
         c.disconnect();

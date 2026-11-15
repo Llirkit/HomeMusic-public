@@ -4,6 +4,7 @@ import type { LaunchOrigin, ListenOut } from '../api/types';
 import { startDownload } from './actions';
 import { hubEvents } from './events';
 import { connectDesktopPlayer } from './desktopPlayer';
+import { AndroidAudio, hasAndroidAudio, type AudioTransport } from './androidAudio';
 import { clearAudioPreload, preloadAudio, takePreloadedAudio } from './audioPreload';
 import { attachAudioOutput, audioOutputReady } from './audioOutput';
 import { NATIVE_PLAYING_EVENT, canPlayAll, pauseNative, webPlayerShown } from './player';
@@ -127,6 +128,7 @@ function set(patch: Partial<ListenState>) {
   persistListening(Object.keys(patch).some((key) => key !== 'position' && key !== 'duration'));
   if (!!state.track !== shown) webPlayerShown(!!state.track);
   for (const fn of subscribers) fn();
+  if (audio instanceof AndroidAudio) queueMicrotask(() => { if (audio instanceof AndroidAudio) audio.syncQueue(); });
 }
 
 function subscribe(fn: () => void) {
@@ -146,10 +148,10 @@ export function useListen<T>(select: (s: ListenState) => T): T {
   return useSyncExternalStore(subscribe, () => select(state));
 }
 
-let audio: HTMLAudioElement | null = null;
+let audio: AudioTransport | null = null;
 
 /** The page player's `<audio>` (null until the first track): `lib/waveAudio.ts` reads its loudness. */
-export const listenAudio = (): HTMLAudioElement | null => audio;
+export const listenAudio = (): HTMLAudioElement | null => audio instanceof AndroidAudio ? null : audio as HTMLAudioElement | null;
 let pendingSeek = 0;
 let resolving: AbortController | null = null;
 let prefetching: { ref: string; ctl: AbortController } | null = null;
@@ -300,12 +302,12 @@ function reportEnd(ended = false, failed = false, interrupted = false) {
   if (persisted) try { localStorage.removeItem(OPEN_PLAY_KEY); } catch (e) { console.error('Could not close listening checkpoint', e); }
 }
 
-function el(): HTMLAudioElement {
+function el(): AudioTransport {
   if (audio) return audio;
-  const a = new Audio();
+  const a = hasAndroidAudio() ? new AndroidAudio(getListenState, (index, position, autoplay) => start(state.queue, index, true, position, autoplay), stopListening) : new Audio();
   a.preload = 'auto';
   a.volume = state.volume;
-  attachAudioOutput(a);
+  if (!(a instanceof AndroidAudio)) attachAudioOutput(a);
   const sync = () =>
     set({ position: pendingSeek || a.currentTime, duration: Number.isFinite(a.duration) && a.duration > 0 ? a.duration : state.duration });
   a.addEventListener('loadedmetadata', () => {
@@ -338,7 +340,7 @@ function el(): HTMLAudioElement {
   // Pauses from outside (audio focus, lock screen); switching tracks also fires one, during 'resolving'.
   a.addEventListener('pause', () => {
     suspendClock();
-    if (!a.ended && (state.phase === 'playing' || state.phase === 'loading')) set({ phase: 'paused' });
+    if (!a.ended && (state.phase === 'playing' || state.phase === 'loading' || a instanceof AndroidAudio && state.phase === 'resolving')) set({ phase: 'paused' });
   });
   // the same element plays on: it was unlocked by the first tap, so the next track may start without one
   a.addEventListener('ended', () => {
@@ -357,7 +359,7 @@ function el(): HTMLAudioElement {
   return a;
 }
 
-function play(a: HTMLAudioElement) {
+function play(a: AudioTransport) {
   const request = ++playRequest;
   const src = a.src;
   // NotAllowedError (no user gesture): wait for the play button; AbortError: a newer track or a pause won.
@@ -383,7 +385,7 @@ function start(queue: readonly ListenTrack[], index: number, auto = false, posit
   pendingSeek = position;
   set({ track, queue, index, context: listContext, phase: autoplay ? 'resolving' : 'paused', info: null, error: null, position, duration: track.duration_s ?? 0 });
   const previousBlob = playingBlob;
-  playingBlob = takePreloadedAudio(track.ref);
+  playingBlob = a instanceof AndroidAudio ? null : takePreloadedAudio(track.ref);
   a.src = playingBlob ?? listenStreamUrl(track.ref);
   if (previousBlob) URL.revokeObjectURL(previousBlob);
   if (autoplay) play(a);
@@ -440,6 +442,7 @@ function prefetchNext() {
 }
 
 function preloadUpcomingAudio() {
+  if (audio instanceof AndroidAudio) return; // Media3 preloads its native timeline.
   const nextTrack = state.repeat === 'one' ? undefined : state.queue[state.index + 1] ??
     (state.repeat === 'all' && !onWave() ? state.queue[0] : undefined);
   // Never compete with initial playback or a stalled current file.
@@ -927,6 +930,7 @@ hubEvents.on('download', (d) => {
 
 /** Lock screen / headset controls in a phone browser (the app's WebView ignores them). */
 function mediaSession(track: ListenTrack) {
+  if (hasAndroidAudio()) return; // The Android service owns the system media session.
   if (!('mediaSession' in navigator) || typeof MediaMetadata === 'undefined') return;
   const ms = navigator.mediaSession;
   ms.metadata = new MediaMetadata({
