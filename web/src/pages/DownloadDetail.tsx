@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { api, withQuery } from '../api/client';
 import type { DownloadItemOut } from '../api/types';
 import { CandidateRow } from '../components/candidate';
+import { SourcePicker } from '../components/SourcePicker';
 import { Icon } from '../components/Icon';
 import { Button, ErrorState, Field, Loading, Notice, PageHeader, ProgressBar, SectionTitle, StatusChip } from '../components/ui';
 import { useHubEvent } from '../lib/events';
@@ -15,6 +16,7 @@ export function DownloadDetailPage({ id }: { id: number }) {
   const res = useAsync((s) => api.downloadItem(id, s), [id]);
   const [busy, setBusy] = useState<string | null>(null);
   const [url, setUrl] = useState('');
+  const [sourceOpen, setSourceOpen] = useState(false);
 
   useHubEvent('download', (d) => {
     if (d.id !== id) return;
@@ -62,6 +64,7 @@ export function DownloadDetailPage({ id }: { id: number }) {
   return (
     <div>
       <PageHeader title={item.title} sub={item.artist} back="/downloads" />
+      {sourceOpen && <SourcePicker title={item.title} artist={item.artist} track_id={item.track_id ?? undefined} nd_song_id={item.nd_song_id} onClose={() => setSourceOpen(false)} />}
       <div className="space-y-3 px-4 pb-2">
         <div className="card space-y-2 p-4">
           <div className="flex flex-wrap items-center gap-2">
@@ -74,6 +77,9 @@ export function DownloadDetailPage({ id }: { id: number }) {
             {[item.artist, item.album].filter(Boolean).join(' · ')}
           </div>
           {item.error && <Notice kind="error">{item.error}</Notice>}
+          {item.replacing_audio && <Notice kind="info">{item.status === 'done'
+            ? 'Аудио заменено. Новый файл прозвучит при следующем запуске трека. Офлайн-копии на телефоне нужно удалить и скачать заново.'
+            : 'Заменяем только аудио. Прежний файл остаётся доступен до успешной проверки нового.'}</Notice>}
           {(item.warnings ?? []).map((w, i) => (
             <Notice key={i}>{warningText(w)}</Notice>
           ))}
@@ -84,8 +90,9 @@ export function DownloadDetailPage({ id }: { id: number }) {
             <Notice kind="info">Загрузка по ♥: песня попадёт в «Понравившиеся», когда файл скачается.</Notice>
           )}
           <div className="flex flex-wrap gap-2 pt-1">
+            {item.status === 'done' && item.track_id && <Button small icon="refresh" onClick={() => setSourceOpen(true)}>Заменить аудиоисточник</Button>}
             {active ? (
-              <Button small variant="danger" icon="x" busy={busy === 'cancel'} onClick={() => run('cancel', () => api.cancel(item.id))}>
+              <Button small variant="danger" icon="x" disabled={item.replacing_audio && item.status === 'importing'} busy={busy === 'cancel'} onClick={() => run('cancel', () => api.cancel(item.id))}>
                 Отменить
               </Button>
             ) : (
@@ -134,7 +141,7 @@ export function DownloadDetailPage({ id }: { id: number }) {
         )}
       </div>
 
-      {candidates.length > 0 && (
+      {item.status !== 'done' && candidates.length > 0 && (
         <section aria-label="Кандидаты">
           <SectionTitle>Найденные файлы</SectionTitle>
           <ul className="divide-y divide-line/60">

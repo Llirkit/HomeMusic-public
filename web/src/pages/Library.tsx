@@ -4,6 +4,7 @@ import type { LibAlbumOut, LibTrackOut, ReleaseType } from '../api/types';
 import { Icon, type IconName } from '../components/Icon';
 import { Button, Cover, Empty, ErrorState, ExplicitBadge, Field, IconButton, SectionTitle, Segmented, Sheet, SkeletonRows } from '../components/ui';
 import { LikeButton } from '../components/LikeButton';
+import { TrackMenuButton } from '../components/TrackMenu';
 import { STANDALONE } from '../lib/embedded';
 import { useHubEvent } from '../lib/events';
 import { fmtDuration, recordTypeLabel, toIntOrNull, tracksWord } from '../lib/format';
@@ -199,6 +200,7 @@ function TrackList({ tracks }: { tracks: LibTrackOut[] }) {
           <span className="hidden shrink-0 text-xs tabular-nums text-dim sm:block">{fmtDuration(track.duration_s)}</span>
           <LikeButton songId={track.nd_song_id} title={track.title} />
           {track.nd_song_id && <IconButton icon="play" label={`Слушать «${track.title}»`} className="text-accent" onClick={() => playFrom(track)} />}
+          <TrackMenuButton track={{ title: track.title, artist: track.artist, track_id: track.id, nd_song_id: track.nd_song_id }} />
         </li>
       ))}
     </ul>

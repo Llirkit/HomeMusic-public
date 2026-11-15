@@ -438,7 +438,9 @@ unlike the wave). The rows are kept for the analytics: `smart_sessions`, `smart_
 |---|---|---|
 | GET | `/api/library/albums?q=&offset=0&limit=50` | `LibAlbumOut[]` |
 | POST | `/api/library/albums` | `AlbumCreateIn` → `LibAlbumOut` (empty custom album / compilation) |
-| GET | `/api/library/track-source?nd_song_id=` | `TrackSourceOut` `{source, source_url, acquired_at}` — where the file came from (`source`: `hitmoz`, `hitmos_fm`, `ytdlp`, `upload`, `manual`); `404` — not a Hub library track (the app's track info) |
+| GET | `/api/library/track-source?track_id=` (или `nd_song_id=`, `ref=nd:…/dz:…`) | `TrackSourceOut {track_id, source, source_url, acquired_at}` — сведения об аудиофайле; `404`, если трека нет в библиотеке Хаба |
+| POST | `/api/library/tracks/{id}/replace-source` | `SourcePickIn {candidate_ref? OR url?, expected_acquired_at}` → `DownloadItemOut` с `replacing_audio=true`. Только явно выбранный файл; устаревшая ревизия или параллельная замена → `409` |
+| POST | `/api/imports/items/{id}/source` | `SourcePickIn` → `DownloadItemOut`: ручной выбор аудио для собственного импорта, включая точные совпадения. Сохранённый трек заменяется; отсутствующий загружается. Каталожное совпадение и позиция сохраняются |
 | GET | `/api/library/albums/{id}` | `LibAlbumOut` with `tracks` |
 | PATCH | `/api/library/albums/{id}` | `AlbumPatchIn` → `LibAlbumOut` (rename, album artist, year, genre, type) |
 | PUT | `/api/library/albums/{id}/cover` | multipart `file` (image) → `LibAlbumOut` |
@@ -659,3 +661,9 @@ serves the current complete APK for first installs and old clients. New manifest
 the Hub checks paths and sizes when exposing metadata and verifies the file hash before download. Clients select
 only a smaller patch with the exact installed base hash and version, then verify the reconstructed APK against `full`.
 The metadata is optional: clients fall back to the historical full APK when absent.
+
+### Замена аудио сохранённого трека
+
+`candidate_ref` берётся из `/api/search/providers`; результат хранится на сервере, истёкший выбор возвращает `409`. Вместо него можно передать `url`. Для библиотечного вызова обязательна ревизия `expected_acquired_at` из `track-source`. Повтор той же заявки возвращает активную загрузку; другой источник при активной замене возвращает `409`.
+
+Публикуется только проверенный и размеченный файл. Сохраняются Track ID/UID, Navidrome ID, теги, обложка и связанные лайки/плейлисты. Прежний файл архивируется в `.backups/source-replacements/<uid>/<download_id>/`. Ошибка не удаляет исходное аудио. Отмена доступна до атомарной публикации; после неё `/cancel` возвращает `409`. Новое аудио появится при следующем воспроизведении; существующие офлайн-копии нужно скачать заново.

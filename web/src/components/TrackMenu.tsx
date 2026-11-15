@@ -10,9 +10,11 @@ import { attempt } from '../lib/ui';
 import { artistSeed, canWave, startWave, trackSeed } from '../lib/wave';
 import { Icon, type IconName } from './Icon';
 import { PlaylistPicker, type PlaylistPick } from './pickers';
+import { SourcePicker } from './SourcePicker';
 import { IconButton, Sheet, cx } from './ui';
 
 export interface MenuTrack {
+  track_id?: number;
   title: string;
   artist: string;
   ref?: string | null;
@@ -75,6 +77,7 @@ async function addToPlaylist(track: MenuTrack, pick: PlaylistPick): Promise<bool
 /** `inPlayer`: opened from a player (the mini player, `/player` and its queue): a wave started here is the player's. */
 function TrackMenu({ track, extra, inPlayer, onClose }: { track: MenuTrack; extra?: MenuExtra[]; inPlayer?: boolean; onClose: () => void }) {
   const [picking, setPicking] = useState(false);
+  const [replacing, setReplacing] = useState(false);
   const [busy, setBusy] = useState(false);
   const trackWave = trackSeed(track);
   const artistWave = artistSeed(track);
@@ -100,6 +103,8 @@ function TrackMenu({ track, extra, inPlayer, onClose }: { track: MenuTrack; extr
     });
   };
 
+  if (replacing) return <SourcePicker title={track.title} artist={track.artist} track_id={track.track_id} nd_song_id={track.nd_song_id} refId={track.ref} onClose={onClose} />;
+
   if (picking)
     return (
       <PlaylistPicker
@@ -118,6 +123,8 @@ function TrackMenu({ track, extra, inPlayer, onClose }: { track: MenuTrack; extr
   return (
     <Sheet open onClose={onClose} title={`${track.artist} — ${track.title}`}>
       <div className="-mx-4 -my-3 flex flex-col py-1">
+        {(track.track_id || track.nd_song_id || track.ref?.startsWith('nd:')) &&
+          <MenuItem icon="refresh" label="Заменить аудиоисточник" hint="Другой файл этой песни, без потери плейлистов и лайков" onClick={() => setReplacing(true)} />}
         {queueable && (
           <>
             <MenuItem

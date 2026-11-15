@@ -6,7 +6,15 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.schemas import ImportIn, ImportItemsOut, ImportOut, ImportPickOut, ImportStartIn
+from app.api.schemas import (
+    DownloadItemOut,
+    ImportIn,
+    ImportItemsOut,
+    ImportOut,
+    ImportPickOut,
+    ImportStartIn,
+    SourcePickIn,
+)
 from app.auth import current_user
 from app.db import get_session
 from app.imports import apply, core
@@ -242,6 +250,51 @@ async def pick(item_id: int, user: User = Depends(current_user),
     await s.commit()
     notify()
     return ImportPickOut(download_item_id=dl.id)
+
+
+@router.post("/items/{item_id}/source", response_model=DownloadItemOut)
+async def choose_source(item_id: int, body: SourcePickIn, user: User = Depends(current_user),
+                        s: AsyncSession = Depends(get_session, scope="function")):
+    from app.jobs.downloads import item_out
+    from app.library.importer import library_lock
+    from app.library.replacement import ACTIVE, picked_candidate, queue_replacement
+
+    it, coll, imp = await _own_item(s, user, item_id)
+    if coll.kind not in ("likes", "playlist"):
+        raise HTTPException(400, "Выбор аудио доступен только для треков")
+    query = apply.track_query(it.raw_json or {})
+    candidate = await picked_candidate(body, query)
+    await s.commit()
+    async with library_lock:
+        await s.refresh(it)
+        previous = await s.get(DownloadItem, it.download_item_id) if it.download_item_id else None
+        if previous and previous.status in ACTIVE:
+            if (previous.chosen_candidate_json or {}).get("page_url") == candidate.page_url:
+                return item_out(previous, detail=True)
+            raise HTTPException(409, "Этот трек уже загружается. Дождитесь завершения")
+        track = await s.get(Track, it.track_id) if it.track_id else None
+        if track is None and previous and previous.track_id:
+            track = await s.get(Track, previous.track_id)
+        if track is None and it.ref and it.ref.startswith("dz:"):
+            track = (await s.execute(select(Track).where(Track.deezer_track_id == it.ref[3:]).limit(1))).scalar_one_or_none()
+        info = {"id": imp.id, "item": it.id}
+        if track:
+            item = await queue_replacement(s, user, track, candidate, body.expected_acquired_at, info)
+        else:
+            raw = it.raw_json or {}
+            meta = {k: raw[k] for k in ("album", "artists", "isrc") if raw.get(k)}
+            if it.ref:
+                meta["track_ref"] = it.ref
+                if it.ref.startswith("dz:"):
+                    meta["deezer_track_id"] = it.ref[3:]
+            item = await apply.new_download(s, imp, {"query": query.model_dump(), "meta": meta,
+                                                    "import": info, "requested": True}, 0)
+            item.chosen_candidate_json = candidate.model_dump(mode="json")
+        it.download_item_id, it.status = item.id, "queued"
+        await s.commit()
+    notify()
+    core.publish(imp)
+    return item_out(item, detail=True)
 
 
 @router.post("/items/{item_id}/skip")

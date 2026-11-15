@@ -193,6 +193,13 @@ class TrackSourceOut(BaseModel):
     source: str | None
     source_url: str | None
     acquired_at: datetime
+    track_id: int | None = None
+
+
+class SourcePickIn(BaseModel):
+    candidate_ref: str | None = Field(default=None, max_length=4096)
+    url: str | None = Field(default=None, max_length=2048)
+    expected_acquired_at: datetime | None = None
 
 
 class LibAlbumOut(BaseModel):
@@ -425,6 +432,7 @@ class DownloadItemOut(BaseModel):
     error: str | None = None
     warnings: list[Any] = []
     track_id: int | None = None
+    replacing_audio: bool = False
     nd_song_id: str | None = None  # Navidrome song once imported and scanned
     playlist_id: str | None = None  # target Navidrome playlist of the batch (Android: sync only that one offline)
     track_ref: str | None = None  # catalog track the item was made from (dz:…)

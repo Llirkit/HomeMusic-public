@@ -269,7 +269,7 @@ async def retry(item_id: int, body: RetryIn, user: User = Depends(current_user),
     elif body.url:
         q = TrackQuery(**item.query_json["query"])
         item.chosen_candidate_json = (await candidate_from_url(body.url, q)).model_dump(mode="json")
-    else:
+    elif not (item.query_json or {}).get("replace_track"):
         item.chosen_candidate_json = None
     item.status = "queued"
     item.error = None
@@ -285,6 +285,19 @@ async def retry(item_id: int, body: RetryIn, user: User = Depends(current_user),
 @router.post("/items/{item_id}/cancel", response_model=DownloadItemOut)
 async def cancel(item_id: int, user: User = Depends(current_user), s: AsyncSession = Depends(get_session, scope="function")):
     item = await _own_item(s, user, item_id)
+    if (item.query_json or {}).get("replace_track"):
+        from app.library.importer import library_lock
+
+        await s.commit()
+        async with library_lock:
+            await s.refresh(item)
+            if item.status in ("importing", "done"):
+                raise HTTPException(409, "Аудио уже заменено. Дождитесь обновления библиотеки")
+            item.status = "cancelled"
+            await s.commit()
+        out = item_out(item)
+        bus.publish(user.id, "download", out.model_dump(mode="json"))
+        return out
     if item.status != "done":
         item.status = "cancelled"
         from app.favorites import download_failed

@@ -15,8 +15,10 @@ from app.api.schemas import (
     AlbumCreateIn,
     AlbumMergeIn,
     AlbumPatchIn,
+    DownloadItemOut,
     LibAlbumOut,
     LibTrackOut,
+    SourcePickIn,
     StarIn,
     StarredOut,
     TrackPatchIn,
@@ -123,12 +125,44 @@ async def create_album(body: AlbumCreateIn, user: User = Depends(current_user), 
 
 
 @router.get("/api/library/track-source", response_model=TrackSourceOut)
-async def track_source(nd_song_id: str, user: User = Depends(current_user),
+async def track_source(nd_song_id: str | None = None, track_id: int | None = None, ref: str | None = None, user: User = Depends(current_user),
                        s: AsyncSession = Depends(get_session, scope="function")):
-    t = (await s.execute(select(Track).where(Track.nd_song_id == nd_song_id).limit(1))).scalar_one_or_none()
+    if track_id is not None:
+        t = await s.get(Track, track_id)
+    elif nd_song_id or (ref and ref.startswith("nd:")):
+        t = (await s.execute(select(Track).where(Track.nd_song_id == (nd_song_id or ref[3:])).limit(1))).scalar_one_or_none()
+    elif ref and ref.startswith("dz:"):
+        t = (await s.execute(select(Track).where(Track.deezer_track_id == ref[3:]).limit(1))).scalar_one_or_none()
+    else:
+        raise HTTPException(400, "Укажите сохранённый трек")
     if t is None:
         raise HTTPException(404, "Трек не найден")
-    return TrackSourceOut(source=t.source, source_url=t.source_url, acquired_at=t.acquired_at)
+    return TrackSourceOut(source=t.source, source_url=t.source_url, acquired_at=t.acquired_at, track_id=t.id)
+
+
+@router.post("/api/library/tracks/{track_id}/replace-source", response_model=DownloadItemOut)
+async def replace_source(track_id: int, body: SourcePickIn, user: User = Depends(current_user),
+                         s: AsyncSession = Depends(get_session, scope="function")):
+    from app.jobs.downloads import item_out
+    from app.library.importer import library_lock
+    from app.library.replacement import picked_candidate, queue_replacement
+    from app.providers.base import TrackQuery
+
+    track = await s.get(Track, track_id)
+    if track is None:
+        raise HTTPException(404, "Трек не найден")
+    if body.expected_acquired_at is None:
+        raise HTTPException(400, "Обновите сведения о текущем источнике")
+    candidate = await picked_candidate(body, TrackQuery(artist=track.artist, title=track.title, duration_s=track.duration_s))
+    await s.commit()
+    async with library_lock:
+        track = await s.get(Track, track_id, populate_existing=True)
+        if track is None:
+            raise HTTPException(404, "Трек уже удалён")
+        item = await queue_replacement(s, user, track, candidate, body.expected_acquired_at)
+        await s.commit()
+    notify()
+    return item_out(item, detail=True)
 
 
 @router.get("/api/library/albums/{album_id}", response_model=LibAlbumOut)

@@ -85,6 +85,7 @@ def item_out(item: DownloadItem, *, detail: bool = False,
         error=item.error,
         warnings=item.warnings or [],
         track_id=item.track_id,
+        replacing_audio=bool((item.query_json or {}).get("replace_track")),
         nd_song_id=links[0],
         playlist_id=links[1],
         track_ref=item_ref(item),
@@ -111,6 +112,8 @@ async def update_item(item_id: int, **fields: Any) -> DownloadItem | None:
         item = await s.get(DownloadItem, item_id)
         if item is None:
             return None
+        if item.status == "cancelled" and (item.query_json or {}).get("replace_track"):
+            return item
         if "query_json" in fields:
             # ♥ / an explicit download may have joined this item meanwhile (`api.downloads.join_active`): the job's
             # copy of query_json predates it
@@ -496,7 +499,10 @@ async def try_candidates(item_id: int, user_id: int, q: TrackQuery, meta: dict[s
 
 async def import_downloaded(item_id: int, user_id: int, q: TrackQuery, meta: dict[str, Any], cand: Candidate,
                             path: Path, check: Any, force: bool, *, warning: str | None = None) -> None:
-    await update_item(item_id, status="tagging", progress=1)
+    current_item = await update_item(item_id, status="tagging", progress=1)
+    replacing = bool(current_item and (current_item.query_json or {}).get("replace_track"))
+    if replacing and current_item.status == "cancelled":
+        return
     cover = await fetch_cover(meta.get("cover_url") or cand.cover_url)
     release_date = _parse_date(meta.get("release_date"))
     single = not meta.get("album")
@@ -530,17 +536,48 @@ async def import_downloaded(item_id: int, user_id: int, q: TrackQuery, meta: dic
         added_by=user_id,
         force=force,
     )
-    await update_item(item_id, status="importing")
+    if not replacing:
+        await update_item(item_id, status="importing")
     async with session_scope() as s:
-        track = await import_file(s, path, spec)
+        item = await s.get(DownloadItem, item_id)
+        if replacing:
+            from app.library.replacement import replace_downloaded
+
+            if item.status == "cancelled":
+                return
+            track = await replace_downloaded(s, item, path, spec)
+            if track is None:
+                return
+        else:
+            track = await import_file(s, path, spec)
         track_id = track.id
     await update_item(item_id, track_id=track_id, warnings=spec.warnings, error=None)
+    if replacing:
+        from app.listen import forget
+
+        if track.nd_song_id:
+            await forget(f"nd:{track.nd_song_id}")
+        if track.deezer_track_id:
+            await forget(f"dz:{track.deezer_track_id}")
     bus.publish(user_id, "library", {"kind": "imported", "track_id": track_id})
     if meta.get("track_ref"):
         from app.listen import forget
 
         await forget(meta["track_ref"])  # from now on listening plays the library file
     await after_import(user_id, linked=False)
+
+
+@handler("refresh_replaced_audio")
+async def refresh_replaced_audio(job: Job) -> None:
+    from app.mixes.embedder import EmbedderClient
+
+    async with session_scope() as s:
+        track = await s.get(Track, job.payload_json["track_id"])
+        if track is None or not track.nd_song_id or not get_settings().embedder_url:
+            return
+        entry = {"key": f"nd:{track.nd_song_id}", "path": track.path}
+    async with EmbedderClient() as client:
+        await client.embed([entry], force=True)
 
 
 async def after_import(user_id: int, linked: bool) -> None:

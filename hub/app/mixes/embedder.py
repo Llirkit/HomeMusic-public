@@ -157,11 +157,14 @@ class EmbedderClient:
         except (httpx.HTTPError, ValueError) as e:
             raise EmbedderDown(f"/healthz: {e!r}") from e
 
-    async def embed(self, items: list[dict[str, str]]) -> int:
+    async def embed(self, items: list[dict[str, str]], *, force: bool = False) -> int:
         """`[{key, url|path}]` into the service's queue (known ones are skipped there). Returns how many were queued."""
         queued = 0
         for i in range(0, len(items), MAX_ITEMS):
-            body = await self._post("/embed", {"items": items[i:i + MAX_ITEMS]})
+            payload = {"items": items[i:i + MAX_ITEMS]}
+            if force:
+                payload["force"] = True
+            body = await self._post("/embed", payload)
             queued += int(body.get("queued") or 0)
             for r in body.get("rejected") or []:
                 log.info("embedder rejected %s: %s", r.get("key"), r.get("error"))

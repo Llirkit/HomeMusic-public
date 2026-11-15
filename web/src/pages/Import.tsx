@@ -10,6 +10,7 @@ import { fmtDuration, fmtSize, fmtWhen, plural, tracksWord } from '../lib/format
 import { useAsync, useInterval } from '../lib/hooks';
 import { listen, type ListenTrack } from '../lib/listen';
 import { TrackMenuButton } from '../components/TrackMenu';
+import { SourcePicker } from '../components/SourcePicker';
 import { canPlay, canPlayAll, playList, playMixed } from '../lib/player';
 import { Link, navigate } from '../lib/router';
 import { copyText } from '../lib/share';
@@ -512,7 +513,7 @@ export function ImportItemsPage({ id, collectionId, match, status }: { id: numbe
   const items = res.data?.items ?? [];
   const tracks = items.filter((x) => x.kind === 'track' && x.status !== 'skipped');
   const playable = tracks.filter((x) => x.nd_song_id || x.ref);
-  const [busyId, setBusyId] = useState<number | null>(null);
+  const [sourceItem, setSourceItem] = useState<ImportItemOut | null>(null);
 
   const play = (from: ImportItemOut) => {
     if (canPlayAll()) {
@@ -527,11 +528,8 @@ export function ImportItemsPage({ id, collectionId, match, status }: { id: numbe
       listen(listenItem(from), queue);
     }
   };
-  const pick = async (it: ImportItemOut) => {
-    setBusyId(it.id);
-    const r = await attempt(() => api.importPick(it.id));
-    setBusyId(null);
-    if (r) navigate(`/downloads/${r.download_item_id}`);
+  const pick = (it: ImportItemOut) => {
+    setSourceItem(it);
   };
 
   return (
@@ -544,6 +542,7 @@ export function ImportItemsPage({ id, collectionId, match, status }: { id: numbe
           canPlayAll() && playable.length ? <IconButton icon="play" label="Слушать все" onClick={() => play(playable[0])} className="!text-accent" /> : undefined
         }
       />
+      {sourceItem && <SourcePicker title={sourceItem.title} artist={sourceItem.artist} importItemId={sourceItem.id} nd_song_id={sourceItem.nd_song_id} onClose={() => setSourceItem(null)} />}
       {match === 'not_found' && <p className="px-4 pb-2 text-sm text-muted">Таких треков нет в каталоге. Нажмите «Выбрать файл» — Хаб поищет по источникам, а вы выберете подходящий.</p>}
       {match === 'probable' && <p className="px-4 pb-2 text-sm text-muted">Похоже, но не наверняка (другая длительность или версия). Если трек не тот — выберите файл сами.</p>}
       {res.loading ? (
@@ -555,7 +554,7 @@ export function ImportItemsPage({ id, collectionId, match, status }: { id: numbe
       ) : (
         <ul className="divide-y divide-line/60">
           {items.map((it, i) => (
-            <ItemRow key={it.id} n={i + 1} it={it} review={collectionId == null} busy={busyId === it.id} onPlay={it.kind === 'track' && (it.nd_song_id || it.ref) ? () => play(it) : undefined} onPick={() => pick(it)} />
+            <ItemRow key={it.id} n={i + 1} it={it} review={collectionId == null} onPlay={it.kind === 'track' && (it.nd_song_id || it.ref) ? () => play(it) : undefined} onPick={() => pick(it)} />
           ))}
         </ul>
       )}
@@ -573,7 +572,7 @@ export function ImportItemsPage({ id, collectionId, match, status }: { id: numbe
 const listenItem = (x: ImportItemOut): ListenTrack => ({ ref: x.ref as string, title: x.title, artist: x.artist, cover_url: x.cover_url, duration_s: x.duration_s });
 
 /** `review`: a part of the report — a probable match offers to pick the file (in a collection it plays). */
-function ItemRow({ n, it, review, busy, onPlay, onPick }: { n: number; it: ImportItemOut; review: boolean; busy: boolean; onPlay?: () => void; onPick: () => void }) {
+function ItemRow({ n, it, review, onPlay, onPick }: { n: number; it: ImportItemOut; review: boolean; onPlay?: () => void; onPick: () => void }) {
   const [label, tone] = MATCH_LABEL[it.match ?? ''] ?? ['', ''];
   const state = rowState(it);
   const needsPick = it.kind === 'track' && (it.status === 'not_found' || it.status === 'failed' || (review && it.match === 'probable' && it.status !== 'queued'));
@@ -593,7 +592,7 @@ function ItemRow({ n, it, review, busy, onPlay, onPick }: { n: number; it: Impor
     </>
   );
   return (
-    <li className="flex items-center gap-2 py-2 pl-2 pr-1">
+    <li className="flex flex-wrap items-center gap-2 py-2 pl-2 pr-1">
       {href ? (
         <Link to={href} className="flex min-w-0 flex-1 items-center gap-3">
           {inner}
@@ -602,17 +601,18 @@ function ItemRow({ n, it, review, busy, onPlay, onPick }: { n: number; it: Impor
         <div className="flex min-w-0 flex-1 items-center gap-3">{inner}</div>
       )}
       {it.kind === 'track' && (it.ref?.startsWith('dz:') || it.nd_song_id) && <TrackMenuButton track={{ title: it.title, artist: it.artist, ref: it.ref, nd_song_id: it.nd_song_id }} />}
-      {needsPick ? (
-        <Button small busy={busy} onClick={onPick}>
-          Выбрать файл
-        </Button>
-      ) : onPlay ? (
+      <div className="flex w-full items-center justify-end gap-2 pl-9">
+      {it.kind === 'track' && <Button small icon="refresh" disabled={it.status === 'queued'} onClick={onPick}>
+        {needsPick ? 'Выбрать файл' : 'Сменить аудио'}
+      </Button>}
+      {!needsPick && onPlay ? (
         !canPlay() && !it.nd_song_id && it.ref ? (
           <ListenButton track={{ ref: it.ref, title: it.title }} onListen={onPlay} />
         ) : canPlay() ? (
           <IconButton icon="play" label={`Слушать «${it.title}»`} onClick={onPlay} className="!text-accent" />
         ) : null
       ) : null}
+      </div>
     </li>
   );
 }

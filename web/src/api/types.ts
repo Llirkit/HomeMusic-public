@@ -426,6 +426,7 @@ export interface DownloadBatchOut {
 }
 
 export interface DownloadItemOut {
+  replacing_audio?: boolean;
   id: number;
   batch_id: number;
   status: DownloadStatus | string;

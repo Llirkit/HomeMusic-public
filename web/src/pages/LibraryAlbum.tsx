@@ -193,7 +193,7 @@ export function LibraryAlbumPage({ id }: { id: number }) {
                 <IconButton icon="play" label={`Слушать «${t.title}»`} className="!text-accent" size={20} onClick={() => playFrom(t)} />
               )}
               <IconButton icon="trash" label={`Удалить «${t.title}»`} className="text-dim hover:text-danger" size={20} onClick={() => deleteTrack(t)} />
-              {t.nd_song_id && <TrackMenuButton track={{ title: t.title, artist: t.artist, nd_song_id: t.nd_song_id }} className="-ml-2 w-8" />}
+              <TrackMenuButton track={{ title: t.title, artist: t.artist, track_id: t.id, nd_song_id: t.nd_song_id }} />
             </li>
           ))}
         </ul>

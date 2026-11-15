@@ -289,6 +289,12 @@ export const api = {
   clearDownloads: () => request<ClearOut>('POST', '/api/downloads/clear'),
 
   // library
+  trackSource: (target: { track_id?: number; nd_song_id?: string | null; ref?: string | null }, signal?: AbortSignal) =>
+    request<{ track_id: number; source: string | null; source_url: string | null; acquired_at: string }>('GET', withQuery('/api/library/track-source', target), { signal }),
+  replaceSource: (id: number, body: { candidate_ref?: string; url?: string; expected_acquired_at?: string }) =>
+    request<DownloadItemOut>('POST', `/api/library/tracks/${id}/replace-source`, { json: body }),
+  importSource: (id: number, body: { candidate_ref?: string; url?: string; expected_acquired_at?: string }) =>
+    request<DownloadItemOut>('POST', `/api/imports/items/${id}/source`, { json: body }),
   libAlbums: (q: string, offset = 0, limit = 50, signal?: AbortSignal) =>
     request<LibAlbumOut[]>('GET', withQuery('/api/library/albums', { q, offset, limit }), { signal }),
   libTracks: (q: string, sort = 'artist', offset = 0, limit = 50, signal?: AbortSignal) =>
