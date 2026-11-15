@@ -101,8 +101,6 @@ const ROUTES: RouteDef[] = [
   ['/share', null, () => <SharePage />],
 ];
 
-const lastByTab: Partial<Record<Tab, string>> = {};
-
 function resolve(route: Route): { tab: Tab | null; node: ReactNode } | null {
   for (const [pattern, tab, render] of ROUTES) {
     const params = matchPath(pattern, route.path);
@@ -163,8 +161,6 @@ export function App() {
 
   // Unknown or empty route → the start screen.
   const resolved = resolve(route);
-  // Each tab remembers where you were (Spotify-like); tapping the active tab goes to its root.
-  if (resolved?.tab) lastByTab[resolved.tab] = route.full;
   useEffect(() => {
     if (me && !resolved) navigate(START, { replace: true });
   }, [me, resolved]);
@@ -231,7 +227,7 @@ export function App() {
       {!fullPlayer && (
         <>
           <MiniPlayer />
-          <TabBar active={resolved?.tab ?? null} last={lastByTab} />
+          <TabBar active={resolved?.tab ?? null} />
         </>
       )}
       <Overlays />

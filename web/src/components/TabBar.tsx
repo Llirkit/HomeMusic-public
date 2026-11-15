@@ -19,7 +19,7 @@ const TABS: Array<{ id: Tab; to: string; label: string; icon: IconName }> = [
 /** The tab a route's own tab shows under: the assistant lives in «Ещё» of a browser. */
 const shownTab = (t: Tab | null): Tab | null => (t && !TABS.some((x) => x.id === t) ? 'more' : t);
 
-export function TabBar({ active: routeTab, last }: { active: Tab | null; last: Partial<Record<Tab, string>> }) {
+export function TabBar({ active: routeTab }: { active: Tab | null }) {
   const activeDownloads = useActiveDownloads();
   if (EMBEDDED) return null; // the Android app shows its own navigation
   const active = shownTab(routeTab);
@@ -36,7 +36,7 @@ export function TabBar({ active: routeTab, last }: { active: Tab | null; last: P
           return (
             <li key={t.id} className="flex-1 lg:flex-none">
               <Link
-                to={on ? t.to : (last[t.id] ?? t.to)}
+                to={t.to}
                 aria-current={on ? 'page' : undefined}
                 className={cx(
                   'relative flex h-16 flex-col items-center justify-center gap-1 rounded-lg text-[11px] transition-colors active:bg-hover lg:h-12 lg:flex-row lg:justify-start lg:gap-3 lg:px-3 lg:text-sm',

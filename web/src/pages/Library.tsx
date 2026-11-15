@@ -31,6 +31,11 @@ export function LibraryPage({ initialQuery }: { initialQuery: string }) {
   const imports = useAsync((s) => api.imports(s), []);
   const offerImport = imports.data?.length === 0 && !dq;
 
+  // A tab click or browser history can change the query without remounting this page.
+  useEffect(() => {
+    setQ((cur) => (cur.trim() === initialQuery ? cur : initialQuery));
+  }, [initialQuery]);
+
   useEffect(() => {
     setExtra([]);
     setMore({ busy: false, done: false });
