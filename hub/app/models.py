@@ -507,6 +507,24 @@ class MixItem(Base):
                                                          index=True)
 
 
+class MoodMix(Base):
+    """An assistant-created sound-query playlist and its not-yet-queued replacement tracks."""
+
+    __tablename__ = "mood_mixes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("download_batches.id", ondelete="CASCADE"), unique=True)
+    nd_playlist_id: Mapped[str] = mapped_column(String(64))
+    name: Mapped[str] = mapped_column(String(256))
+    query: Mapped[str] = mapped_column(String(500))
+    library_count: Mapped[int] = mapped_column(Integer)
+    new_count: Mapped[int] = mapped_column(Integer)
+    # Full CatalogTrack dumps, ordered. A failed download atomically consumes the next one.
+    reserve_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class WaveSession(Base):
     """One «Моя волна» of a user (MIXES.md 7): the endless stream the Hub picks 5 tracks at a time. `state_json` —
     the pool of candidates, what was handed out and played, the session's skips and likes (`app.mixes.wave`)."""

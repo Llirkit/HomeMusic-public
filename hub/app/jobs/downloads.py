@@ -39,7 +39,7 @@ from app.matching.select import (
     trusted_original,
     uploaded_in_time,
 )
-from app.models import DownloadBatch, DownloadItem, Job, PendingPlaylistAdd, Track, User
+from app.models import DownloadBatch, DownloadItem, Job, MoodMix, PendingPlaylistAdd, Track, User
 from app.net import make_client
 from app.providers.base import Candidate, ProviderError, TrackQuery, file_ref
 from app.services import svc
@@ -132,9 +132,43 @@ async def update_item(item_id: int, **fields: Any) -> DownloadItem | None:
         await s.refresh(item)
         if "status" in fields and item.status in TERMINAL:
             await mixes_done(s, [item])
+        if "status" in fields and item.status == "failed":
+            await _replace_failed_mood_track(s, item)
         links = (await item_links(s, [item]))[item.id]
     bus.publish(item.user_id, "download", item_out(item, links=links).model_dump(mode="json"))
     return item
+
+
+async def _replace_failed_mood_track(s: AsyncSession, failed: DownloadItem) -> None:
+    """Keep an assistant mood mix's new-track quota while its ordered reserve lasts.
+
+    ``update_item`` has already written in this transaction, so SQLite serializes concurrent failures before they
+    inspect and consume the shared JSON reserve.
+    """
+    mood = (await s.execute(select(MoodMix).where(MoodMix.batch_id == failed.batch_id))).scalar_one_or_none()
+    if mood is None:
+        return
+    items = list((await s.execute(select(DownloadItem).where(DownloadItem.batch_id == failed.batch_id))).scalars())
+    # ``needs_review`` can still be completed by the user and therefore keeps its quota slot.
+    live = sum(i.status not in ("failed", "cancelled") for i in items)
+    reserve = list(mood.reserve_json or [])
+    existing = {item_ref(i) for i in items}
+    while live < mood.new_count and reserve:
+        raw = reserve.pop(0)
+        track = CatalogTrack.model_validate(raw)
+        if track.ref in existing:
+            continue
+        meta = meta_from_catalog(track)
+        replacement = DownloadItem(batch_id=failed.batch_id, user_id=failed.user_id, query_json={
+            "query": query_from_track(track).model_dump(), "meta": meta,
+            "mood_mix": {"id": mood.id, "replaces": failed.id},
+        })
+        s.add(replacement)
+        await s.flush()
+        await enqueue(s, "download_item", {"item_id": replacement.id})
+        existing.add(track.ref)
+        live += 1
+    mood.reserve_json = reserve
 
 
 # --- catalog meta ----------------------------------------------------------------------------

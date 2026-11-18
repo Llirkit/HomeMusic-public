@@ -335,6 +335,77 @@ async def test_moves_yandex_likes_into_a_playlist_without_asking(env):
     assert coll["rows"][0][:5] == [env["yandex"]["likes_id"], "likes", "Мне нравится", True, "done:2"]
 
 
+async def test_creates_sound_mix_with_server_side_quota_and_reserve(env, monkeypatch):
+    from sqlalchemy import select
+
+    from app.ai import mood
+    from app.catalog.models import CatalogTrack
+    from app.db import session_scope
+    from app.models import MoodMix
+
+    own = [{"song_id": "ndA", "artist": "Кино", "title": "Группа крови", "similarity": .81,
+            "taste_score": 2.0}]
+    fresh = [CatalogTrack(ref=f"dz:{i}", source="dz", id=str(i), artist=f"Новый {i}",
+                          artists=[f"Новый {i}"], title=f"Песня {i}") for i in range(10, 16)]
+
+    async def library(*_args, **_kwargs):
+        return own
+
+    async def catalog(*_args, **_kwargs):
+        return fresh
+
+    monkeypatch.setattr(mood, "library_by_sound", library)
+    monkeypatch.setattr(mood, "_catalog_by_sound", catalog)
+    out = await chat(
+        env, "Создай меланхоличный микс: половина моих, половина новых",
+        completion(calls=[tool_call("create_mood_mix", name="Меланхолия", query="меланхоличная музыка",
+                                    total=2, library_percent=50)]),
+        completion("Создал микс 1/1."),
+    )
+    created = next(v for v in env["state"]["playlists"].values() if v["name"] == "Меланхолия")
+    assert created["songs"] == ["ndA"]
+    assert out["done"] == ["Создан звуковой микс «Меланхолия»: 1 из библиотеки, 1 новых поставлено в загрузку, резерв 5"]
+    result = tool_results(env)[0]
+    assert (result["library"], result["new"], result["new_queued"], result["reserve"]) == (1, 1, 1, 5)
+    async with session_scope() as s:
+        saved = (await s.execute(select(MoodMix))).scalar_one()
+        assert saved.new_count == 1 and len(saved.reserve_json) == 5
+
+
+async def test_assistant_can_read_taste_and_search_by_sound(env, monkeypatch):
+    from app.ai import mood
+
+    async def profile(*_args, **_kwargs):
+        return {"counts": {"strong": 12}, "facets": [{"artists": ["Кино"]}], "sound": "available"}
+
+    async def sound(*_args, **_kwargs):
+        return [{"song_id": "ndB", "artist": "ДДТ", "title": "Осень", "similarity": .77}]
+
+    async def tracks(*_args, **_kwargs):
+        return {"total": 1, "rows": [{"key": "nd:ndB", "artist": "ДДТ", "title": "Осень", "s": 2.1}]}
+
+    async def history(*_args, **_kwargs):
+        return {"key": "nd:ndB", "s": 2.1, "formula": "s = sat(P) − N", "contributions": [{"kind": "finish"}]}
+
+    monkeypatch.setattr(mood, "taste_profile", profile)
+    monkeypatch.setattr(mood, "library_by_sound", sound)
+    monkeypatch.setattr(mood, "taste_tracks", tracks)
+    monkeypatch.setattr(mood, "taste_track_history", history)
+    await chat(env, "Что ты знаешь о моём вкусе?",
+               completion(calls=[tool_call("get_taste_profile")]), completion("12 сильных треков."))
+    assert tool_results(env)[0]["sound"] == "available"
+    await chat(env, "Найди осеннее меланхоличное звучание",
+               completion(calls=[tool_call("search_by_sound", query="осенняя меланхолия", limit=5)]),
+               completion("Нашёл ДДТ — Осень."))
+    assert tool_results(env)[0]["tracks"][0]["song_id"] == "ndB"
+    await chat(env, "Почему у Осени такая оценка?",
+               completion(calls=[tool_call("get_taste_tracks", q="Осень", limit=5)]),
+               completion(calls=[tool_call("get_track_history", key="nd:ndB")]),
+               completion("Трек получил 2,1 за полное прослушивание."))
+    assert tool_results(env)[0]["rows"][0]["s"] == 2.1
+    assert tool_results(env)[1]["contributions"][0]["kind"] == "finish"
+
+
 async def test_starred_songs_name_the_import_that_starred_them(env):
     await chat(env, "что из яндекса?", completion(calls=[tool_call("list_starred", only="imports")]),
                completion("Два трека."))

@@ -40,6 +40,15 @@ async def test_profile_and_vectors_use_same_space(client, respx_mock):
     assert scores.scores == {"x": .7} and found.vectors == {"x": [1, 0]}
 
 
+async def test_text_search_keeps_the_library_allow_list(client, respx_mock):
+    route = respx_mock.post(f"{BASE}/text").respond(json={
+        "model": "fake", "results": [{"key": "nd:a", "sim": .75}]})
+    found = await client.text("melancholic piano", limit=12, keys=["nd:a", "nd:b"])
+    assert found == [embedder.TextMatch("nd:a", .75)]
+    assert json.loads(route.calls.last.request.content) == {
+        "text": "melancholic piano", "limit": 12, "keys": ["nd:a", "nd:b"]}
+
+
 @pytest.mark.parametrize("status", [404, 503], ids=["old-service", "unavailable"])
 async def test_v2_unavailable_uses_existing_down_fallback(client, respx_mock, status):
     route = respx_mock.post(f"{BASE}/v2/profile").respond(status)

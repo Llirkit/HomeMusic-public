@@ -523,6 +523,16 @@ At the limit these POST routes return `429` with a Russian `detail` and `Retry-A
 before calling the model, saving images or queuing a task. History, confirmation and dismissal remain available
 and do not count as messages.
 
+Chat tools include read-only `get_taste_profile` (v2 counts, facets and top weighted tracks), `get_taste_tracks`,
+`get_track_history` (score inputs and listening-event contributions), and `search_by_sound` (MuQ-MuLan
+text-to-audio search over an explicit allow-list of the current library).
+`create_mood_mix {name, query, total=50, library_percent=50}` computes both quotas on the server, creates a
+Navidrome playlist only when both pools are complete, and queues the catalog half into it. `mood_mixes` keeps an
+ordered catalog reserve; a terminal `failed` download consumes the next reserve entry until the
+requested new-track quota or the reserve is exhausted. Already-owned and disliked tracks are excluded from the
+catalog half, disliked library tracks are excluded from the owned half, and selection is capped at two tracks per
+artist. The tool returns an error without leaving a partial playlist when the sound index lacks enough candidates.
+
 | Method | Path | Body → Response |
 |---|---|---|
 | POST | `/api/assistant/tasks` | multipart `images` (repeat) **or** JSON `AssistantTextIn` (`url` of a Yandex Music / YouTube playlist or album, or free `text`) → `AssistantTaskOut` |

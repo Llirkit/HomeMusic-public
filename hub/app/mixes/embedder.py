@@ -126,6 +126,12 @@ class Similarity:
     missing: set[str] = field(default_factory=set)
 
 
+@dataclass(frozen=True)
+class TextMatch:
+    key: str
+    sim: float
+
+
 class EmbedderClient:
     def __init__(self, client: httpx.AsyncClient | None = None):
         s = get_settings()
@@ -185,6 +191,21 @@ class EmbedderClient:
         if not keys:
             return {}
         return dict((await self._post("/vectors", {"keys": keys[:MAX_ITEMS]})).get("vectors") or {})
+
+    async def text(self, query: str, *, limit: int = 20, prefix: str | None = None,
+                   keys: list[str] | None = None) -> list[TextMatch]:
+        """Nearest already embedded audio to a MuQ-MuLan text query.
+
+        ``keys`` deliberately makes library searches an allow-list: another user's or a stale vector can never leak
+        into an assistant result merely because it is still present in the shared embedder index.
+        """
+        payload: dict[str, Any] = {"text": query, "limit": min(max(limit, 1), 500)}
+        if prefix is not None:
+            payload["prefix"] = prefix
+        if keys is not None:
+            payload["keys"] = list(dict.fromkeys(keys))[:MAX_ITEMS * 10]
+        body = await self._post("/text", payload)
+        return [TextMatch(str(row["key"]), float(row["sim"])) for row in body.get("results") or []]
 
     async def _geometry(self, path: str, body: dict[str, Any], schema, *, space: GeometrySpace | None = None):
         try:
