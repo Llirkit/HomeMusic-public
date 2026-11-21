@@ -12,6 +12,13 @@ from app.matching.normalize import normalize_title
 from app.models import Album, Track
 
 
+def _soundtrack_releases(candidates: list[dict]) -> list[dict]:
+    # A game title also occurs on cover singles and arrangement compilations.
+    return [a for a in candidates if re.search(
+        r"\bost\b|soundtrack|vocal tracks|саундтрек", a["title"], re.I) and not re.search(
+        r"cover|tribute|arrangement|кавер|трибьют", a["title"], re.I)]
+
+
 def album_favorite_query(text: str) -> str | None:
     # Keep ordinary account/import/playlist operations on the existing general chat path.
     if not re.search(r"\b(?:добавь(?:те)?|добавить|поставь(?:те)?|отметь(?:те)?)\b", text, re.I):
@@ -34,7 +41,7 @@ def album_favorite_query(text: str) -> str | None:
     return query or None
 
 
-async def album_candidates(query: str, s: AsyncSession | None = None) -> list[dict]:
+async def album_candidates(query: str, s: AsyncSession | None = None, *, soundtrack: bool = False) -> list[dict]:
     from app.services import svc
 
     words = query.split()
@@ -46,6 +53,8 @@ async def album_candidates(query: str, s: AsyncSession | None = None) -> list[di
             if set(words) <= set(normalize_title(album.title).text.split()):
                 library.append({"ref": f"library:{album.id}", "library_id": album.id, "title": album.title,
                                 "artist": album.album_artist, "tracks": count})
+        if soundtrack:
+            library = _soundtrack_releases(library)
         if library:
             return library
     queries = list(dict.fromkeys([query, " ".join(words[:2])]))
@@ -59,4 +68,7 @@ async def album_candidates(query: str, s: AsyncSession | None = None) -> list[di
                 continue
             found[album.ref] = {"ref": album.ref, "title": album.title,
                                 "artist": album.artist, "tracks": album.nb_tracks}
-    return list(found.values())
+    candidates = list(found.values())
+    if soundtrack:
+        candidates = _soundtrack_releases(candidates)
+    return candidates

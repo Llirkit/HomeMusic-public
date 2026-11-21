@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import secrets
 from datetime import timedelta
 from typing import Any
@@ -632,7 +633,8 @@ async def run_chat(s: AsyncSession, user: User, messages: list[dict[str, str]],
     from app.ai.album_scope import album_candidates, album_favorite_query
 
     album_query = album_favorite_query(messages[-1].get("content", "")) if messages and not images else None
-    candidates = await album_candidates(album_query, s=s) if album_query else None
+    soundtrack = bool(messages and re.search(r"\bost\b|саундтрек", messages[-1].get("content", ""), re.I))
+    candidates = await album_candidates(album_query, s=s, soundtrack=soundtrack) if album_query else None
     if candidates == []:
         return {"reply": "Не нашёл подходящий альбом в каталоге. Уточните название или пришлите ссылку на релиз.",
                 "actions": [], "done": []}
@@ -667,11 +669,13 @@ async def run_chat(s: AsyncSession, user: User, messages: list[dict[str, str]],
     if settings.llm_chat_presence_penalty is not None:
         sampling["presence_penalty"] = settings.llm_chat_presence_penalty
     reply = ""
+    tool_choice = ({"type": "function", "function": {"name": "favorite_album"}}
+                   if candidates is not None and len(candidates) == 1 else "auto")
     try:
         for _step in range(MAX_STEPS):
             try:
                 resp = await client.chat.completions.create(model=settings.llm_model, messages=convo, tools=available_tools,
-                                                            tool_choice="auto", **sampling,
+                                                            tool_choice=tool_choice, **sampling,
                                                             max_tokens=settings.llm_chat_max_tokens,
                                                             extra_body=extra_body)
             except Exception as e:

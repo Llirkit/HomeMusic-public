@@ -28,9 +28,12 @@ async def test_album_candidates_require_all_title_words_and_whole_releases(monke
                         artist="Various", nb_tracks=27),
         SimpleNamespace(ref="dz:2", title="Revengeance", artist="Other", nb_tracks=12),
         SimpleNamespace(ref="dz:3", title="Rules (From Metal Gear Rising Revengeance)", artist="Cover", nb_tracks=1),
+        SimpleNamespace(ref="dz:4", title="Metal Gear Rising Revengeance Iconic Themes", artist="Arcade", nb_tracks=13),
     ]))
     monkeypatch.setattr(svc, "deezer", SimpleNamespace(search=search))
     out = await album_candidates("gear rising revengeance")
-    assert [a["ref"] for a in out] == ["dz:1"]
+    assert [a["ref"] for a in out] == ["dz:1", "dz:4"]
     assert out[0]["tracks"] == 27
     assert {call.args[0] for call in search.call_args_list} == {"gear rising", "gear rising revengeance"}
+    original = await album_candidates("gear rising revengeance", soundtrack=True)
+    assert [a["ref"] for a in original] == ["dz:1"]
