@@ -454,6 +454,50 @@ async def test_changes_made_stay_listed_when_the_model_stops_answering(env):
     assert r.json()["done"] == ["♥ поставлено: 1 трек"]
 
 
+async def test_chat_uses_configured_reasoning_budget(env, monkeypatch):
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "llm_chat_max_tokens", 65536)
+    await chat(env, "Привет", completion("Привет!"))
+    assert env["state"]["llm_requests"][0]["max_tokens"] == 65536
+
+
+@pytest.mark.parametrize("content", ["", "   \n"])
+async def test_empty_reply_is_visible_and_saved(env, content):
+    out = await chat(env, "Добавь музыку", completion(content))
+    assert "пустой ответ" in out["reply"] and "не выполнен" in out["reply"]
+    saved = await env["client"].get(f"/api/assistant/chats/{out['chat_id']}")
+    assert saved.json()["messages"][-1]["content"] == out["reply"]
+
+
+async def test_truncated_reasoning_does_not_execute_incomplete_tool_calls(env):
+    response = completion(calls=[tool_call("delete_playlist", playlist_ids=["pl1"])])
+    response["choices"][0]["finish_reason"] = "length"
+    response["choices"][0]["message"]["reasoning"] = "thinking"
+    out = await chat(env, "Удали плейлист", response)
+    assert "исчерпал лимит" in out["reply"]
+    assert not out["actions"] and not out["done"] and not env["state"]["deleted"]
+
+
+@pytest.mark.parametrize("ending", ["empty", "length", "missing-choice"])
+async def test_changes_survive_empty_or_truncated_final_reply(env, ending):
+    final = completion()
+    if ending == "length":
+        final["choices"][0]["finish_reason"] = "length"
+    elif ending == "missing-choice":
+        final["choices"] = []
+    out = await chat(env, "Поставь ♥", completion(calls=[tool_call("star", song_ids=["ndA"])]), final)
+    assert out["reply"].strip()
+    assert out["done"] == ["♥ поставлено: 1 трек"]
+
+
+async def test_empty_reply_keeps_confirmation_visible(env):
+    out = await chat(env, "Удали плейлист", completion(calls=[tool_call("delete_playlist", playlist_ids=["pl1"])]),
+                     completion())
+    assert "Подтвердите" in out["reply"]
+    assert out["actions"] and not env["state"]["deleted"]
+
+
 async def test_chat_turns_are_saved_and_continue_the_same_chat(env):
     c = env["client"]
     first = await chat(env, "поставь ♥ Группе крови", completion(calls=[tool_call("star", song_ids=["ndA"])]),

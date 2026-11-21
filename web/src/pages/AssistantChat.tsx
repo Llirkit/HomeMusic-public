@@ -51,6 +51,7 @@ interface ChatState {
 }
 
 const CURRENT_KEY = 'hm.chat.current';
+const EMPTY_REPLY = 'ИИ не прислал ответ. Попробуйте отправить запрос ещё раз.';
 let account: number | null = null;
 let accountVersion = 0;
 let state: ChatState = { id: null, entries: [], loading: false, sending: false };
@@ -91,7 +92,7 @@ export function currentChatId(): number | null {
 const fromSaved = (m: SavedChatMessage): Entry => ({
   id: ++seq,
   role: m.role,
-  content: m.content,
+  content: m.role === 'assistant' && !m.content.trim() && !m.done?.length && !m.proposal ? EMPTY_REPLY : m.content,
   cost: m.cost,
   done: m.done,
   imageCount: m.images,
@@ -202,7 +203,7 @@ async function send(content: string, attached: File[]) {
       actions.length && r.task_id && r.confirm_token
         ? { taskId: r.task_id, token: r.confirm_token, summary: r.summary ?? '', actions, state: 'pending' }
         : undefined;
-    update((s) => ({ entries: [...s.entries, { id: ++seq, role: 'assistant', content: r.reply || '', cost: r.cost_usd, done: r.done ?? [], proposal }] }));
+    update((s) => ({ entries: [...s.entries, { id: ++seq, role: 'assistant', content: r.reply?.trim() || (!r.done?.length && !proposal ? EMPTY_REPLY : ''), cost: r.cost_usd, done: r.done ?? [], proposal }] }));
   } catch (e) {
     if (g === gen) update((s) => ({ entries: [...s.entries, { id: ++seq, role: 'assistant', content: errorMessage(e), error: true }] }));
   } finally {

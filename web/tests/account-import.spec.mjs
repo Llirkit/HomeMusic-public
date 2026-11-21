@@ -22,11 +22,11 @@ async function backend(page, { authenticated = true } = {}) {
     if (path === '/api/events') return route.fulfill({ contentType: 'text/event-stream', body: 'event: ping\ndata: {}\n\n' });
     if (path === '/api/assistant/chat') {
       if (state.holdReply) await state.holdReply;
-      return json({ chat_id: 11, reply: 'Поздний личный ответ Alice', actions: [], done: [] }).catch(() => {});
+      return json({ chat_id: 11, reply: state.chatReply ?? 'Поздний личный ответ Alice', actions: [], done: [] }).catch(() => {});
     }
     if (path === '/api/assistant/chats/11') {
       return state.me?.id === 1
-        ? json({ id: 11, title: 'Личный чат', messages: [{ role: 'user', content: 'Секрет Alice' }], created_at: '2026-11-12T10:00:00', updated_at: '2026-11-12T10:00:00' })
+        ? json({ id: 11, title: 'Личный чат', messages: state.savedMessages ?? [{ role: 'user', content: 'Секрет Alice' }], created_at: '2026-11-12T10:00:00', updated_at: '2026-11-12T10:00:00' })
         : json({ detail: 'Чат не найден' }, 404);
     }
     if (path === '/api/imports/text') {
@@ -71,6 +71,23 @@ async function logout(page) {
   await page.getByRole('alertdialog').getByRole('button', { name: 'Выйти', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Имя или почта' })).toBeVisible();
 }
+
+test('assistant shows a recovery message for saved and new empty replies', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const state = await backend(page);
+  state.savedMessages = [{ role: 'user', content: 'Добавь треки' }, { role: 'assistant', content: '', done: [] }];
+  state.chatReply = '   ';
+  await page.goto('/#/assistant?chat=11');
+  const fallback = page.getByText('ИИ не прислал ответ. Попробуйте отправить запрос ещё раз.', { exact: true });
+  await expect(fallback).toBeVisible();
+  await page.getByRole('textbox').fill('Попробуй ещё раз');
+  await page.getByRole('button', { name: 'Отправить', exact: true }).click();
+  await expect(fallback).toHaveCount(2);
+  await expect(page.getByText('Думаю…', { exact: true })).toHaveCount(0);
+  expect(errors).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
 
 test('logout isolates messages, screenshot URLs and delayed replies; same-account navigation retains chat', async ({ page }) => {
   const errors = [];

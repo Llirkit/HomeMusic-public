@@ -640,7 +640,7 @@ async def run_chat(s: AsyncSession, user: User, messages: list[dict[str, str]],
         for _step in range(MAX_STEPS):
             try:
                 resp = await client.chat.completions.create(model=settings.llm_model, messages=convo, tools=TOOLS,
-                                                            tool_choice="auto", max_tokens=2500,
+                                                            tool_choice="auto", max_tokens=settings.llm_chat_max_tokens,
                                                             extra_body=extra_body)
             except Exception as e:
                 if not tools.done and not tools.proposal:
@@ -650,10 +650,21 @@ async def run_chat(s: AsyncSession, user: User, messages: list[dict[str, str]],
                 reply = "ИИ перестал отвечать посреди работы — вот что успел сделать."
                 break
             usage += usage_of(resp, settings)
-            msg = resp.choices[0].message
+            if not resp.choices:
+                reply = "ИИ не прислал ответ. Попробуйте отправить запрос ещё раз."
+                break
+            choice = resp.choices[0]
+            if choice.finish_reason == "length":
+                # A cut-off function call may contain incomplete arguments: never execute it.
+                log.warning("chat token limit reached: step=%s, max_tokens=%s", _step,
+                            settings.llm_chat_max_tokens, extra={"user_id": user.id})
+                reply = ("ИИ исчерпал лимит ответа и не завершил запрос. "
+                         "Попробуйте разбить запрос на несколько частей.")
+                break
+            msg = choice.message
             calls = msg.tool_calls or []
             if not calls:
-                reply = msg.content or ""
+                reply = (msg.content or "").strip()
                 break
             convo.append({"role": "assistant", "content": msg.content or "",
                           "tool_calls": [c.model_dump() for c in calls]})
@@ -676,6 +687,14 @@ async def run_chat(s: AsyncSession, user: User, messages: list[dict[str, str]],
             reply = f"Не получилось уложиться в {MAX_STEPS} шагов — уточните запрос."
     finally:
         await tools.aclose()
+        await client.close()
+    if not reply:
+        if tools.proposal:
+            reply = "Подтвердите предложенные действия ниже."
+        elif tools.done:
+            reply = "Выполненные действия перечислены ниже. ИИ не прислал пояснение."
+        else:
+            reply = "ИИ вернул пустой ответ. Запрос не выполнен. Попробуйте отправить его ещё раз."
     tokens_in, tokens_out, cost = usage.tokens_in, usage.tokens_out, usage.cost_usd
     if tokens_in or tokens_out or cost:
         s.add(AiUsage(user_id=user.id, kind="chat", tokens_in=tokens_in, tokens_out=tokens_out, cost_usd=cost))
