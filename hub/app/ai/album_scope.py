@@ -14,6 +14,10 @@ from app.models import Album, Track
 
 def album_favorite_query(text: str) -> str | None:
     # Keep ordinary account/import/playlist operations on the existing general chat path.
+    if not re.search(r"\b(?:добавь(?:те)?|добавить|поставь(?:те)?|отметь(?:те)?)\b", text, re.I):
+        return None
+    if re.search(r"\bне\s+(?:добав|став|постав|отмеч|отмет)", text, re.I):
+        return None
     if not re.search(r"любим|понрав|избран|♥", text, re.I):
         return None
     if not re.search(r"\b(?:все|всех|весь)\s+(?:треки|треков|песни|песен|альбом)", text, re.I):

@@ -12,6 +12,9 @@ from app.ai.album_scope import album_candidates, album_favorite_query
     ("Добавь в любимое все треки из Яндекс Музыки", None),
     ("Добавь в любимое все треки из плейлиста OST", None),
     ("Найди саундтрек Gear Rising OST", None),
+    ("Убери из любимого все треки из Game OST", None),
+    ("Не добавь в любимое все треки из Game OST", None),
+    ("Покажи в любимом все треки из Game OST", None),
 ])
 def test_album_request_scope(text, query):
     assert album_favorite_query(text) == query
