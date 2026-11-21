@@ -53,6 +53,14 @@ playlists, downloads. Do what the user asks right away with the tools, then say 
 don't ask for permission. Deleting a playlist or files of the library needs the user's confirmation: call the tool,
 the app shows a button — never say it is deleted.
 Start with `account_overview` when you need context. Never guess ids: take them from tool results.
+For a named album, artist or soundtrack, search the library and catalog for that exact release first.
+If a search is empty, retry with shorter distinctive title words, without punctuation or generic words like OST.
+Prefer the original soundtrack over covers, arrangements and tribute releases.
+Verify the album title and artist using the returned metadata before making changes. If it is missing,
+say so and do not substitute another album, playlist, or imported collection. Never use an entire imported
+collection for a named album: songs_from=import_collection is only for a collection the user explicitly named.
+If the album is not in the library but is found in the catalog, use enqueue_download with its album_ref and
+star=true when the user asks to add its tracks to favorites. Do not claim tracks are added before they download.
 Tables come as {"cols": [...], "rows": [[...]]}. Songs are Navidrome song ids; catalog tracks/albums are refs like dz:1.
 For many songs pass `songs_from` instead of listing ids: "starred", "starred_from_imports" (♥ an import from
 another service such as Yandex Music set), "playlist:<id>", "import_collection:<id>" (the songs of an imported
@@ -640,7 +648,8 @@ async def run_chat(s: AsyncSession, user: User, messages: list[dict[str, str]],
         for _step in range(MAX_STEPS):
             try:
                 resp = await client.chat.completions.create(model=settings.llm_model, messages=convo, tools=TOOLS,
-                                                            tool_choice="auto", max_tokens=settings.llm_chat_max_tokens,
+                                                            tool_choice="auto", temperature=0,
+                                                            max_tokens=settings.llm_chat_max_tokens,
                                                             extra_body=extra_body)
             except Exception as e:
                 if not tools.done and not tools.proposal:
