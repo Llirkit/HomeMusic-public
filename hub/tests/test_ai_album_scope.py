@@ -1,0 +1,33 @@
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+
+from app.ai.album_scope import album_candidates, album_favorite_query
+
+
+@pytest.mark.parametrize(("text", "query"), [
+    ("добавь мне в любимое все треки из Gear Rising: Revengeance OST", "gear rising revengeance"),
+    ("Добавь в избранное все песни из альбома Nevermind", "nevermind"),
+    ("Добавь в любимое все треки из Яндекс Музыки", None),
+    ("Добавь в любимое все треки из плейлиста OST", None),
+    ("Найди саундтрек Gear Rising OST", None),
+])
+def test_album_request_scope(text, query):
+    assert album_favorite_query(text) == query
+
+
+async def test_album_candidates_require_all_title_words_and_whole_releases(monkeypatch):
+    from app.services import svc
+
+    search = AsyncMock(return_value=SimpleNamespace(albums=[
+        SimpleNamespace(ref="dz:1", title="METAL GEAR RISING REVENGEANCE Vocal Tracks Selection",
+                        artist="Various", nb_tracks=27),
+        SimpleNamespace(ref="dz:2", title="Revengeance", artist="Other", nb_tracks=12),
+        SimpleNamespace(ref="dz:3", title="Rules (From Metal Gear Rising Revengeance)", artist="Cover", nb_tracks=1),
+    ]))
+    monkeypatch.setattr(svc, "deezer", SimpleNamespace(search=search))
+    out = await album_candidates("gear rising revengeance")
+    assert [a["ref"] for a in out] == ["dz:1"]
+    assert out[0]["tracks"] == 27
+    assert {call.args[0] for call in search.call_args_list} == {"gear rising", "gear rising revengeance"}

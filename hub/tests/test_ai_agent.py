@@ -502,6 +502,69 @@ async def test_empty_reply_keeps_confirmation_visible(env):
     assert out["actions"] and not env["state"]["deleted"]
 
 
+@pytest.mark.parametrize("bad_call", [
+    tool_call("star", songs_from="import_collection:1"),
+    tool_call("enqueue_download", track_refs=["dz:999"], star=True),
+    tool_call("favorite_album", album_ref="dz:999"),
+])
+async def test_whole_album_request_cannot_mutate_unrelated_music(env, monkeypatch, bad_call):
+    from unittest.mock import AsyncMock
+
+    from app.ai import album_scope
+    from app.ai.agent import ChatTools
+
+    monkeypatch.setattr(album_scope, "album_candidates", AsyncMock(return_value=[
+        {"ref": "dz:123", "title": "Game OST", "artist": "Composer", "tracks": 27},
+    ]))
+    queued = []
+
+    async def enqueue(self, **kwargs):
+        queued.append(kwargs)
+        self.done.append("Поставлено в загрузку: альбомов: 1 с ♥")
+        return {"batches": [1]}
+
+    monkeypatch.setattr(ChatTools, "enqueue_download", enqueue)
+    out = await chat(env, "Добавь в любимое все треки из Game OST", completion(calls=[bad_call]),
+                     completion(calls=[tool_call("favorite_album", album_ref="dz:123"),
+                                       tool_call("favorite_album", album_ref="dz:123")]))
+    assert queued == [{"album_refs": ["dz:123"], "star": True}]
+    assert "27 треков" in out["reply"] and "по мере загрузки" in out["reply"]
+    assert env["state"]["stars"] == ["ndA", "ndB", "ndC"]
+    assert "error" in tool_results(env)[0]
+    assert {t["function"]["name"] for t in env["state"]["llm_requests"][0]["tools"]} == {"favorite_album"}
+
+
+async def test_missing_album_does_not_fall_back_to_unrelated_music(env, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from app.ai import album_scope
+
+    monkeypatch.setattr(album_scope, "album_candidates", AsyncMock(return_value=[]))
+    out = await chat(env, "Добавь в любимое все треки из Unknown OST")
+    assert "Не нашёл" in out["reply"]
+    assert not out["done"] and not env["state"]["llm_requests"]
+
+
+async def test_whole_album_already_in_library_stars_every_song(env):
+    from sqlalchemy import select
+
+    from app.db import session_scope
+    from app.models import Album, Track
+
+    async with session_scope() as s:
+        album = Album(uid=str(uuid.uuid4()), title="Game OST", album_artist="Composer")
+        s.add(album)
+        await s.flush()
+        album_id = album.id
+        for track in (await s.execute(select(Track))).scalars():
+            track.album_id = album.id
+    env["state"]["stars"] = ["ndC"]
+    out = await chat(env, "Добавь в любимое все треки из Game OST",
+                     completion(calls=[tool_call("favorite_album", album_ref=f"library:{album_id}")]))
+    assert set(env["state"]["stars"]) == {"ndA", "ndB", "ndC"}
+    assert "2 трека" in out["reply"] and "добавлены" in out["reply"]
+
+
 async def test_chat_turns_are_saved_and_continue_the_same_chat(env):
     c = env["client"]
     first = await chat(env, "поставь ♥ Группе крови", completion(calls=[tool_call("star", song_ids=["ndA"])]),
