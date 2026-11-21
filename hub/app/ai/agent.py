@@ -643,12 +643,17 @@ async def run_chat(s: AsyncSession, user: User, messages: list[dict[str, str]],
         convo.append({"role": m["role"], "content": content})
     usage = LLMUsage()
     extra_body = {"usage": {"include": True}} if is_openrouter(settings.llm_base_url) else None
+    sampling = {}
+    if settings.llm_chat_temperature is not None:
+        sampling["temperature"] = settings.llm_chat_temperature
+    if settings.llm_chat_presence_penalty is not None:
+        sampling["presence_penalty"] = settings.llm_chat_presence_penalty
     reply = ""
     try:
         for _step in range(MAX_STEPS):
             try:
                 resp = await client.chat.completions.create(model=settings.llm_model, messages=convo, tools=TOOLS,
-                                                            tool_choice="auto", temperature=0,
+                                                            tool_choice="auto", **sampling,
                                                             max_tokens=settings.llm_chat_max_tokens,
                                                             extra_body=extra_body)
             except Exception as e:

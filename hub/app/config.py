@@ -196,6 +196,8 @@ class Settings(BaseSettings):
     llm_timeout_s: float = 90
     # Includes a reasoning model's hidden thinking. Size this to the server's context/VRAM budget.
     llm_chat_max_tokens: int = Field(default=16384, ge=1)
+    llm_chat_temperature: float | None = Field(default=None, ge=0, le=2)
+    llm_chat_presence_penalty: float | None = Field(default=None, ge=-2, le=2)
 
     # Last.fm API (similar tracks/artists, tags for mix names): https://www.last.fm/api/account/create
     lastfm_api_key: str = ""

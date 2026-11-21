@@ -458,8 +458,12 @@ async def test_chat_uses_configured_reasoning_budget(env, monkeypatch):
     from app.config import get_settings
 
     monkeypatch.setattr(get_settings(), "llm_chat_max_tokens", 65536)
+    monkeypatch.setattr(get_settings(), "llm_chat_temperature", 1.0)
+    monkeypatch.setattr(get_settings(), "llm_chat_presence_penalty", 1.5)
     await chat(env, "Привет", completion("Привет!"))
     assert env["state"]["llm_requests"][0]["max_tokens"] == 65536
+    assert env["state"]["llm_requests"][0]["temperature"] == 1.0
+    assert env["state"]["llm_requests"][0]["presence_penalty"] == 1.5
 
 
 @pytest.mark.parametrize("content", ["", "   \n"])
