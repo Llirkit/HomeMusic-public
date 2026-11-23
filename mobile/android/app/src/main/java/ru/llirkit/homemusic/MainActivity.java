@@ -43,6 +43,7 @@ public final class MainActivity extends Activity {
   private Button homeTab, offlineTab;
   private ProgressBar webLoading;
   private OfflineLyricsDialog lyricsDialog;
+  private AppUpdater updater;
   private boolean seeking = false;
   private ValueCallback<Uri[]> files;
   private View webError;
@@ -93,6 +94,7 @@ public final class MainActivity extends Activity {
     super.onCreate(saved);
     prefs = getSharedPreferences("app", MODE_PRIVATE);
     base = prefs.getString("server", BuildConfig.SERVER_URL);
+    updater = new AppUpdater(this, base);
     owner = prefs.getString("owner", "");
     db = new Store(this);
     LinearLayout root = new LinearLayout(this);
@@ -117,6 +119,7 @@ public final class MainActivity extends Activity {
     TextView title = text("HomeMusic", 20);
     header.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1));
     title.setGravity(Gravity.CENTER_VERTICAL);
+    header.addView(button("Обновления", v -> updater.show()));
     header.addView(button("Сервер", v -> serverDialog()));
     root.addView(header);
     pages = new FrameLayout(this);
@@ -841,6 +844,9 @@ public final class MainActivity extends Activity {
                           clearAccount();
                           base = next;
                           prefs.edit().putString("server", base).apply();
+                          updater.close();
+                          updater = new AppUpdater(this, base);
+                          updater.resume();
                           CookieManager.getInstance().removeAllCookies(done -> web.loadUrl(base));
                         }
                         d.dismiss();
@@ -944,16 +950,19 @@ public final class MainActivity extends Activity {
   protected void onResume() {
     super.onResume();
     handler.post(tick);
+    if (updater != null) updater.resume();
   }
 
   @Override
   protected void onPause() {
+    if (updater != null) updater.pause();
     handler.removeCallbacks(tick);
     super.onPause();
   }
 
   @Override
   protected void onDestroy() {
+    if (updater != null) updater.close();
     if (PlaybackService.current != null) PlaybackService.current.onlineListener = null;
     if (lyricsDialog != null) lyricsDialog.dismiss();
     handler.removeCallbacks(tick);
