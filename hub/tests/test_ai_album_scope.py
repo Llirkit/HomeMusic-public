@@ -3,7 +3,23 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.ai.album_scope import album_candidates, album_favorite_query
+from app.ai.album_scope import album_candidates, album_favorite_query, album_playlist_query
+
+
+@pytest.mark.parametrize(("text", "query"), [
+    ("собери плейлист из оста red alert 2", "red alert 2"),
+    ("собери плейлист из ост треков игры red alert 2", "red alert 2"),
+    ("Создай плейлист из Red Alert 2 OST", "red alert 2"),
+    ("Сделай плейлист из саундтрека игры Red Alert 2", "red alert 2"),
+    ("Составь плейлист из всех треков альбома Nevermind", "nevermind"),
+    ("Собери плейлист из музыки в стиле Red Alert 2 OST", None),
+    ("Собери плейлист из похожих на OST Red Alert 2 треков", None),
+    ("Не создавай плейлист из Red Alert 2 OST", None),
+    ("Удали плейлист Red Alert 2 OST", None),
+    ("Собери плейлист из любимых", None),
+])
+def test_album_playlist_scope(text, query):
+    assert album_playlist_query(text) == query
 
 
 @pytest.mark.parametrize(("text", "query"), [

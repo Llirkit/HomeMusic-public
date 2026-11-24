@@ -565,6 +565,76 @@ async def test_whole_album_already_in_library_stars_every_song(env):
     assert "2 трека" in out["reply"] and "добавлены" in out["reply"]
 
 
+@pytest.mark.parametrize("bad_call", [
+    tool_call("create_mood_mix", name="Red Alert 2 Original Soundtrack Mix", query="industrial", library_percent=100),
+    tool_call("create_playlist", name="Red Alert 2 Original Soundtrack Mix", songs_from="starred"),
+    tool_call("playlist_album", album_ref="dz:999"),
+])
+async def test_soundtrack_playlist_rejects_substitution(env, monkeypatch, bad_call):
+    from unittest.mock import AsyncMock
+
+    from app.ai import album_scope
+    from app.ai.agent import ChatTools
+
+    candidates = AsyncMock(return_value=[
+        {"ref": "dz:123", "title": "Red Alert 2 Original Soundtrack", "artist": "Composer", "tracks": 16},
+    ])
+    monkeypatch.setattr(album_scope, "album_candidates", candidates)
+    queued = []
+
+    async def enqueue(self, **kwargs):
+        queued.append(kwargs)
+        self.done.append("Поставлен в загрузку саундтрек")
+
+    monkeypatch.setattr(ChatTools, "enqueue_download", enqueue)
+    out = await chat(env, "собери плейлист из оста red alert 2",
+                     completion(calls=[bad_call]),
+                     completion(calls=[tool_call("playlist_album", album_ref="dz:123"),
+                                       tool_call("playlist_album", album_ref="dz:123")]))
+    assert candidates.call_args.args == ("red alert 2",)
+    assert candidates.call_args.kwargs["soundtrack"] is True
+    assert queued == [{"album_refs": ["dz:123"], "new_playlist_name": "Red Alert 2 Original Soundtrack"}]
+    assert "16 треков" in out["reply"] and "по мере загрузки" in out["reply"]
+    assert list(env["state"]["playlists"]) == ["pl1"]
+    assert env["state"]["stars"] == ["ndA", "ndB", "ndC"]
+    assert "error" in tool_results(env)[0]
+    assert {t["function"]["name"] for t in env["state"]["llm_requests"][0]["tools"]} == {"playlist_album"}
+
+
+async def test_missing_soundtrack_playlist_creates_nothing(env, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from app.ai import album_scope
+
+    monkeypatch.setattr(album_scope, "album_candidates", AsyncMock(return_value=[]))
+    out = await chat(env, "Собери плейлист из ост треков игры red alert 2")
+    assert "Не нашёл" in out["reply"]
+    assert not out["done"] and not env["state"]["llm_requests"]
+    assert list(env["state"]["playlists"]) == ["pl1"]
+
+
+async def test_soundtrack_playlist_from_library_preserves_album_order(env):
+    from sqlalchemy import select
+
+    from app.db import session_scope
+    from app.models import Album, Track
+
+    async with session_scope() as s:
+        album = Album(uid=str(uuid.uuid4()), title="Red Alert 2 OST", album_artist="Composer")
+        s.add(album)
+        await s.flush()
+        album_id = album.id
+        for track in await s.scalars(select(Track)):
+            track.album_id = album.id
+            track.disc_no = 1
+            track.track_no = 2 if track.nd_song_id == "ndA" else 1
+    out = await chat(env, "Собери плейлист из OST игры Red Alert 2",
+                     completion(calls=[tool_call("playlist_album", album_ref=f"library:{album_id}")]))
+    assert env["state"]["playlists"]["pl2"] == {"name": "Red Alert 2 OST", "songs": ["ndB", "ndA"]}
+    assert env["state"]["stars"] == ["ndA", "ndB", "ndC"]
+    assert "2 трека" in out["reply"]
+
+
 async def test_chat_turns_are_saved_and_continue_the_same_chat(env):
     c = env["client"]
     first = await chat(env, "поставь ♥ Группе крови", completion(calls=[tool_call("star", song_ids=["ndA"])]),

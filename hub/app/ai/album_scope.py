@@ -1,4 +1,4 @@
-"""Bound an explicit whole-album favorite request to matching catalog albums."""
+"""Bound explicit album operations to matching releases, never sound-alike music."""
 
 from __future__ import annotations
 
@@ -10,6 +10,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.matching.normalize import normalize_title
 from app.models import Album, Track
+
+SOUNDTRACK = r"\b(?:ost|ост(?:а|ов)?)\b|саундтрек\w*|soundtrack"
+
+
+def album_playlist_query(text: str) -> str | None:
+    """Recognize a playlist OF a release; playlists LIKE it stay on the mood path."""
+    if not re.search(r"плейлист", text, re.I) or not re.search(SOUNDTRACK + r"|альбом", text, re.I):
+        return None
+    if re.search(r"\bне\s+(?:созда|соб|сдел)|похож|в стиле|по мотивам|настроени|звучани", text, re.I):
+        return None
+    if not re.search(r"созда|собер|собрать|сдела|состав", text, re.I):
+        return None
+    match = re.search(r"\bиз\s+(.+?)[.!?]*$", text, re.I)
+    if not match:
+        return None
+    title = re.sub(SOUNDTRACK + r"|\b(?:original|альбома|треков|треков игры|треки|песен|песни|игры|игре|всех|все)\b",
+                   " ", match[1], flags=re.I)
+    return normalize_title(title).text or None
 
 
 def _soundtrack_releases(candidates: list[dict]) -> list[dict]:
