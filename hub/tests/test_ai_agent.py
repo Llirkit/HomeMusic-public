@@ -598,7 +598,8 @@ async def test_soundtrack_playlist_rejects_substitution(env, monkeypatch, bad_ca
     assert list(env["state"]["playlists"]) == ["pl1"]
     assert env["state"]["stars"] == ["ndA", "ndB", "ndC"]
     assert "error" in tool_results(env)[0]
-    assert {t["function"]["name"] for t in env["state"]["llm_requests"][0]["tools"]} == {"playlist_album"}
+    assert {t["function"]["name"] for t in env["state"]["llm_requests"][0]["tools"]} == {
+        "playlist_album", "search_music_sources", "read_music_page", "download_web_release"}
 
 
 async def test_missing_soundtrack_playlist_creates_nothing(env, monkeypatch):
@@ -607,9 +608,9 @@ async def test_missing_soundtrack_playlist_creates_nothing(env, monkeypatch):
     from app.ai import album_scope
 
     monkeypatch.setattr(album_scope, "album_candidates", AsyncMock(return_value=[]))
-    out = await chat(env, "Собери плейлист из ост треков игры red alert 2")
-    assert "Не нашёл" in out["reply"]
-    assert not out["done"] and not env["state"]["llm_requests"]
+    out = await chat(env, "Собери плейлист из ост треков игры red alert 2", completion("Не найдено"))
+    assert "Не удалось" in out["reply"]
+    assert not out["done"] and env["state"]["llm_requests"]
     assert list(env["state"]["playlists"]) == ["pl1"]
 
 

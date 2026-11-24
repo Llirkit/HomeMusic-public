@@ -30,6 +30,7 @@ class Services:
         from app.providers.hitmos_fm import HitmosFmProvider
         from app.providers.hitmoz import HitmozProvider
         from app.providers.reuploads import SoundcloudProvider, YtReuploadProvider
+        from app.providers.web_audio import WebAudioProvider
         from app.providers.ytdlp import YoutubeAccess, YtdlpProvider
 
         settings = get_settings()
@@ -37,6 +38,7 @@ class Services:
         hitmoz = HitmozProvider(cfg.hitmoz)
         youtube = YoutubeAccess(cfg.ytdlp)
         self.providers = {
+            "web_audio": WebAudioProvider(),
             "hitmoz": hitmoz,
             "hitmos_fm": HitmosFmProvider(cfg.hitmos_fm),
             "ytdlp": YtdlpProvider(cfg.ytdlp, access=youtube),
