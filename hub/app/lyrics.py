@@ -140,7 +140,9 @@ _runtime: Runtime | None = None
 def runtime() -> Runtime:
     global _runtime
     if _runtime is None:
-        _runtime = Runtime(make_client(timeout=8, headers={
+        # LRCLIB can negotiate HTTP/2 but stall without returning response headers.
+        # Keep lyrics on HTTP/1.1; changing the shared client would affect audio/catalogs.
+        _runtime = Runtime(make_client(timeout=8, http2=False, headers={
             "User-Agent": "HomeMusic/0.2 (https://github.com/justman-1/HomeMusic-public)",
         }))
     return _runtime

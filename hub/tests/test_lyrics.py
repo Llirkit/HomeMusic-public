@@ -15,6 +15,24 @@ from tests.support import FakeDeezer, app_client
 real_metadata = lyrics.metadata
 
 
+async def test_runtime_uses_http1_for_lyrics(monkeypatch):
+    await lyrics.reset()
+    calls = []
+    client = httpx.AsyncClient()
+
+    def make_client(**kwargs):
+        calls.append(kwargs)
+        return client
+
+    monkeypatch.setattr(lyrics, "make_client", make_client)
+    try:
+        assert lyrics.runtime() is lyrics.runtime()
+        assert len(calls) == 1
+        assert calls[0]["http2"] is False
+    finally:
+        await lyrics.reset()
+
+
 def record(**patch):
     return {"id": 1, "artistName": "Кино", "trackName": "Группа крови", "duration": 245,
             "plainLyrics": "Первая строка\nВторая строка", "syncedLyrics": "[00:01.50]Первая строка\n[00:04]Вторая строка",
