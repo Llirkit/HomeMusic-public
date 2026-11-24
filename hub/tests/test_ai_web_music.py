@@ -27,7 +27,8 @@ def test_page_uses_published_metadata_and_order():
     assert {x["url"] for x in page["links"]} >= {"https://composer.example/soundtracks"}
 
 
-async def test_web_release_queues_only_fetched_tracks_after_empty_catalog(env, monkeypatch):
+@pytest.mark.parametrize("direct", [True, False])
+async def test_web_release_queues_only_fetched_tracks_after_empty_catalog(env, monkeypatch, direct):
     from sqlalchemy import select
 
     from app.ai import album_scope, web_music
@@ -35,7 +36,11 @@ async def test_web_release_queues_only_fetched_tracks_after_empty_catalog(env, m
     from app.models import DownloadItem
 
     monkeypatch.setattr(album_scope, "album_candidates", AsyncMock(return_value=[]))
-    monkeypatch.setattr(web_music, "read_page", AsyncMock(return_value=parse_page(HTML, URL)))
+    page = parse_page(HTML, URL)
+    if not direct:
+        for track in page["tracks"]:
+            track["audio_url"] = None
+    monkeypatch.setattr(web_music, "read_page", AsyncMock(return_value=page))
     ref = parse_page(HTML, URL)["release_ref"]
     out = await chat(env, "Собери плейлист из OST Game 2",
                      completion(calls=[tool_call("read_music_page", url=URL)]),
@@ -46,8 +51,31 @@ async def test_web_release_queues_only_fetched_tracks_after_empty_catalog(env, m
         items = list(await s.scalars(select(DownloadItem).order_by(DownloadItem.id)))
         assert [i.query_json["query"]["title"] for i in items] == ["First", "Second"]
         assert [i.query_json["meta"]["track_no"] for i in items] == [1, 2]
-        assert all(i.chosen_candidate_json["provider"] == "web_audio" for i in items)
+        assert all(i.chosen_candidate_json["provider"] == "web_audio" if direct else i.chosen_candidate_json is None
+                   for i in items)
     assert len(env["state"]["playlists"]) == 2
+
+
+@pytest.mark.parametrize("complete", [True, False])
+async def test_apple_album_reads_complete_tracklist_without_preview_downloads(monkeypatch, complete):
+    import json
+
+    from app.ai import web_music
+
+    rows = [{"wrapperType": "collection", "collectionName": "Game 2 OST", "trackCount": 1 if complete else 2},
+            {"kind": "song", "collectionId": 123, "artistName": "Composer", "trackName": "First",
+             "trackNumber": 1, "trackTimeMillis": 224000, "previewUrl": "https://store.example/preview.m4a"}]
+    reader = AsyncMock(side_effect=[HTML, json.dumps({"results": rows}).encode()])
+    monkeypatch.setattr(web_music, "public_read", reader)
+    if not complete:
+        with pytest.raises(ValueError, match="полный список"):
+            await web_music.read_page("https://music.apple.com/us/album/game/123")
+        return
+    page = await web_music.read_page("https://music.apple.com/us/album/game/123")
+    assert page["title"] == "Game 2 OST"
+    assert page["tracks"] == [{"number": 1, "artist": "Composer", "title": "First", "duration_s": 224,
+                               "audio_url": None}]
+    assert "lookup?id=123" in reader.call_args.args[0]
 
 
 async def test_web_release_rejects_unread_or_wrong_album(env, monkeypatch):

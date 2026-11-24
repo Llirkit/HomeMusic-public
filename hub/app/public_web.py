@@ -28,7 +28,8 @@ async def public_stream(url: str):
         for _ in range(5):
             target, address = await public_address(url)
             async with client.stream("GET", target.copy_with(host=address),
-                                     headers={"Host": target.host, "User-Agent": "HomeMusic/1.0 (music research)"},
+                                     headers={"Host": target.host,
+                                              "User-Agent": "HomeMusic/1.0 (https://github.com/Llirkit/HomeMusic-public)"},
                                      extensions={"sni_hostname": target.host}) as response:
                 if response.is_redirect:
                     url = str(target.join(response.headers["location"]))

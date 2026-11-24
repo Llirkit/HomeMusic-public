@@ -89,4 +89,21 @@ def parse_page(html: bytes, url: str) -> dict:
 
 
 async def read_page(url: str) -> dict:
-    return parse_page(await public_read(url), url)
+    page = parse_page(await public_read(url), url)
+    parsed = urlsplit(url)
+    if parsed.hostname == "music.apple.com" and (match := re.search(r"/album/(?:[^/]+/)?(\d+)", parsed.path)):
+        # Store HTML often omits the tracklist. Its public metadata API supplies the complete release.
+        # previewUrl is intentionally never read: full audio goes through our normal download providers.
+        params = urlencode({"id": match[1], "entity": "song", "country": "us", "limit": 200})
+        rows = json.loads(await public_read("https://itunes.apple.com/lookup?" + params)).get("results", [])
+        album = next((r for r in rows if r.get("wrapperType") == "collection"), None)
+        songs = sorted((r for r in rows if r.get("kind") == "song" and str(r.get("collectionId")) == match[1]),
+                       key=lambda r: (r.get("discNumber", 1), r.get("trackNumber", 0)))
+        if not album or not songs or album.get("trackCount") != len(songs):
+            raise ValueError("Источник не вернул полный список треков альбома")
+        page["title"] = album["collectionName"]
+        page["tracks"] = [{"number": i, "artist": t["artistName"], "title": t["trackName"],
+                           "duration_s": round(t["trackTimeMillis"] / 1000) if t.get("trackTimeMillis") else None,
+                           "audio_url": None} for i, t in enumerate(songs, 1)]
+        page["text"] = "Проверенный полный треклист. download_web_release найдёт полные файлы через источники HomeMusic."
+    return page
