@@ -24,7 +24,8 @@ WORKDIR /app
 COPY hub/pyproject.toml hub/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY hub/ ./
-RUN rm -rf /app/.venv /app/data && uv sync --frozen --no-dev
+# Uvicorn импортирует app из /app: установка локального пакета в контейнере не нужна.
+RUN rm -rf /app/.venv /app/data && uv sync --frozen --no-dev --no-install-project
 COPY --from=web /src/hub/app/static /app/app/static
 EXPOSE 8080
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers", "--forwarded-allow-ips", "*", "--no-access-log"]
