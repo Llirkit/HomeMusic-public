@@ -542,6 +542,8 @@ class Publication(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     wave_id: Mapped[str | None] = mapped_column(String(32))
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime)
+    revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class WaveSession(Base):

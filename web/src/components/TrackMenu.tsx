@@ -12,7 +12,7 @@ import { Icon, type IconName } from './Icon';
 import { PlaylistPicker, type PlaylistPick } from './pickers';
 import { SourcePicker } from './SourcePicker';
 import { IconButton, Sheet, cx } from './ui';
-import { PublicationActions } from './PublicationActions';
+import { PlayingRadioActions, PublicationActions } from './PublicationActions';
 
 export interface MenuTrack {
   track_id?: number;
@@ -88,6 +88,7 @@ function TrackMenu({ track, extra, inPlayer, onClose }: { track: MenuTrack; extr
   const artistDisliked = useDisliked(artist ?? { artist_ref: '\u0000' });
   const playing = useListen((s) => !!track.ref && s.track?.ref === track.ref);
   const hasQueue = useListen((s) => !!s.track);
+  const context = useListen((s) => inPlayer ? s.context : '');
   // the page's own player plays here (a browser, an app without `playQueue`)
   const queueable = !!track.listen && !canPlayAll() && !playing;
   const albumTo = track.album_ref ? `/album/${enc(track.album_ref)}` : STANDALONE && track.nd_album_id ? `/lib/album/${enc(track.nd_album_id)}` : null;
@@ -123,6 +124,7 @@ function TrackMenu({ track, extra, inPlayer, onClose }: { track: MenuTrack; extr
 
   return (
     <Sheet open onClose={onClose} title={`${track.artist} — ${track.title}`}>
+      {inPlayer && <div className="pb-3"><PlayingRadioActions context={context} inline /></div>}
       {(track.ref || track.nd_song_id) && <div className="pb-3"><PublicationActions inline sourceKind="track" sourceId={track.ref || `nd:${track.nd_song_id}`} /></div>}
       <div className="-mx-4 -my-3 flex flex-col py-1">
         {(track.track_id || track.nd_song_id || track.ref?.startsWith('nd:')) &&

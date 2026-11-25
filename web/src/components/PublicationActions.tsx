@@ -15,6 +15,13 @@ export interface Publication {
   url: string;
 }
 
+/** Use the queue's original mix/session, including a former daily mix still playing. */
+export function PlayingRadioActions({ context, inline = false }: { context: string; inline?: boolean }) {
+  const match = /^(mix|wave):(.+)$/.exec(context);
+  if (!match) return null;
+  return <PublicationActions sourceKind={match[1] === 'mix' ? 'mix' : 'wave'} sourceId={match[2]} radio share={false} inline={inline} />;
+}
+
 export function PublicationLink({ publication: p }: { publication: Publication }) {
   return <div className="space-y-3">
     <p className="text-sm text-muted">{p.kind === 'radio' ? 'Публичный эфир: все слушают одну песню одновременно. Вход не нужен.' : 'Слушать по этой ссылке можно после входа в HomeMusic. Состав подборки сохранён на момент публикации.'}</p>

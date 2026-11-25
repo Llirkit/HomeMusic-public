@@ -3,14 +3,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import secrets
+from datetime import timedelta
 from typing import Literal
 from urllib.parse import quote
 from weakref import WeakValueDictionary
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.medialib import nd_call, songs_out
@@ -48,6 +50,28 @@ class CreateIn(BaseModel):
     kind: Literal["share", "radio"] = "share"
     source_kind: Literal["track", "playlist", "mix", "wave"]
     source_id: str = Field(min_length=1, max_length=256)
+
+
+class ControlIn(BaseModel):
+    action: Literal["pause", "resume", "next", "previous", "play", "move", "remove", "shuffle", "seek", "add_playlist"]
+    revision: int = Field(ge=0)
+    index: int | None = Field(default=None, ge=0)
+    to_index: int | None = Field(default=None, ge=0)
+    position_s: float | None = Field(default=None, ge=0, le=86400, allow_inf_nan=False)
+    playlist_id: str | None = Field(default=None, min_length=1, max_length=256)
+
+
+async def optional_user(request: Request, s: AsyncSession = Depends(get_session, scope="function")):
+    try:
+        return await current_user(request, s)
+    except HTTPException as e:
+        if e.status_code != 401:
+            raise
+        return None
+
+
+def can_manage(p: Publication, user: User | None):
+    return user is not None and (user.is_admin or p.user_id == user.id)
 
 
 def output(p: Publication, request: Request, user_id: int | None = None):
@@ -147,7 +171,8 @@ async def create(body: CreateIn, request: Request, user: User = Depends(current_
 @router.get("")
 async def own(request: Request, user: User = Depends(current_user),
               s: AsyncSession = Depends(get_session, scope="function")):
-    rows = (await s.scalars(select(Publication).where(Publication.user_id == user.id,
+    visible = or_(Publication.user_id == user.id, Publication.kind == "radio") if user.is_admin else Publication.user_id == user.id
+    rows = (await s.scalars(select(Publication).where(visible,
                        Publication.active.is_(True)).order_by(Publication.created_at.desc()))).all()
     return [output(p, request, user.id) for p in rows]
 
@@ -163,7 +188,7 @@ async def find(s: AsyncSession, token: str, kind: str):
 async def revoke(token: str, user: User = Depends(current_user),
                  s: AsyncSession = Depends(get_session, scope="function")):
     p = await s.get(Publication, token)
-    if p is None or p.user_id != user.id:
+    if p is None or (p.user_id != user.id and not (user.is_admin and p.kind == "radio")):
         raise HTTPException(404, "Ссылка не найдена")
     p.active = False
     return {"ok": True}
@@ -178,7 +203,7 @@ async def shared(token: str, request: Request, user: User = Depends(current_user
 
 def on_air(p: Publication, now):
     durations = [max(1, t.get("duration_s") or 180) for t in p.tracks_json]
-    elapsed = max(0, (now - p.started_at).total_seconds())
+    elapsed = max(0, ((p.paused_at or now) - p.started_at).total_seconds())
     total = sum(durations)
     # Playlists loop, waves replenish when their last track ends.
     offset = elapsed % total
@@ -191,7 +216,7 @@ def on_air(p: Publication, now):
 
 async def advance_radio(p: Publication, s: AsyncSession):
     index, position, ended = on_air(p, utcnow())
-    if ended and p.wave_id:
+    if ended and p.wave_id and p.paused_at is None:
         owner = await s.get(User, p.user_id)
         sid = p.wave_id
         await s.commit()
@@ -214,6 +239,7 @@ async def advance_radio(p: Publication, s: AsyncSession):
                 raise HTTPException(503, "Радио подбирает следующие песни. Подождите немного.")
             p.tracks_json = tracks
             p.started_at = utcnow()
+            p.revision += 1
             index, position = 0, 0
             await s.commit()
         except wave.WaveError as e:
@@ -244,14 +270,105 @@ async def radio_loop():
 
 
 @router.get("/{token}/radio")
-async def radio(token: str, request: Request, s: AsyncSession = Depends(get_session, scope="function")):
+async def radio(token: str, request: Request, user: User | None = Depends(optional_user),
+                s: AsyncSession = Depends(get_session, scope="function")):
     async with station_lock(token):
         p = await find(s, token, "radio")
         index, position = await advance_radio(p, s)
         track = p.tracks_json[index]
-        return {**output(p, request), "track": track, "position_s": position,
+        return {**output(p, request, user.id if user else None), "track": track, "position_s": position,
+                "paused": p.paused_at is not None, "revision": p.revision, "index": index,
+                "queue_count": len(p.tracks_json), "can_manage": can_manage(p, user),
                 "duration_s": track.get("duration_s"), "server_time": utcnow().isoformat() + "Z",
                 "stream_url": f"/api/publications/{token}/audio/{index}?v={quote(track['ref'], safe='')}"}
+
+
+def queue_out(p: Publication):
+    index, position, _ = on_air(p, utcnow())
+    return {"tracks": p.tracks_json, "index": index, "position_s": position,
+            "paused": p.paused_at is not None, "revision": p.revision}
+
+
+@router.get("/{token}/manage")
+async def manage(token: str, user: User = Depends(current_user),
+                 s: AsyncSession = Depends(get_session, scope="function")):
+    async with station_lock(token):
+        p = await find(s, token, "radio")
+        if not can_manage(p, user):
+            raise HTTPException(403, "Управлять эфиром могут только создатель и администраторы")
+        await advance_radio(p, s)
+        return queue_out(p)
+
+
+def anchor(p: Publication, index: int, position: float, now):
+    elapsed = sum(max(1, t.get("duration_s") or 180) for t in p.tracks_json[:index]) + position
+    p.started_at = now - timedelta(seconds=elapsed)
+    if p.paused_at is not None:
+        p.paused_at = now
+
+
+@router.post("/{token}/control")
+async def control(token: str, body: ControlIn, user: User = Depends(current_user),
+                  s: AsyncSession = Depends(get_session, scope="function")):
+    async with station_lock(token):
+        p = await find(s, token, "radio")
+        if not can_manage(p, user):
+            raise HTTPException(403, "Управлять эфиром могут только создатель и администраторы")
+        await advance_radio(p, s)
+        if body.revision != p.revision:
+            raise HTTPException(409, "Эфир уже изменился. Обновите очередь и повторите действие.")
+        now = utcnow()
+        current, position, _ = on_air(p, now)
+        tracks = list(p.tracks_json)
+        count = len(tracks)
+        if body.action in ("play", "move", "remove") and (body.index is None or body.index >= count):
+            raise HTTPException(400, "Выберите трек из очереди")
+        if body.action == "pause":
+            p.paused_at = p.paused_at or now
+        elif body.action == "resume":
+            if p.paused_at is not None:
+                p.started_at += now - p.paused_at
+                p.paused_at = None
+        elif body.action in ("next", "previous", "play"):
+            target = body.index if body.action == "play" else (current + (1 if body.action == "next" else -1)) % count
+            anchor(p, target, 0, now)
+        elif body.action == "seek":
+            duration = max(1, tracks[current].get("duration_s") or 180)
+            if body.position_s is None or body.position_s >= duration:
+                raise HTTPException(400, "Позиция должна находиться внутри текущей песни")
+            anchor(p, current, body.position_s, now)
+        elif body.action in ("move", "remove", "shuffle"):
+            numbered = list(enumerate(tracks))
+            if body.action == "move":
+                if body.to_index is None or body.to_index >= count:
+                    raise HTTPException(400, "Выберите место в очереди")
+                numbered.insert(body.to_index, numbered.pop(body.index))
+            elif body.action == "remove":
+                if count == 1:
+                    raise HTTPException(409, "В эфире должен остаться хотя бы один трек")
+                numbered.pop(body.index)
+            else:
+                random.SystemRandom().shuffle(numbered)
+            p.tracks_json = [t for _, t in numbered]
+            new_index = next((i for i, (old, _) in enumerate(numbered) if old == current), None)
+            if new_index is None:
+                new_index, position = current % len(numbered), 0
+            anchor(p, new_index, position, now)
+        elif body.action == "add_playlist":
+            if not body.playlist_id:
+                raise HTTPException(400, "Выберите плейлист")
+            _, extra = await source(CreateIn(source_kind="playlist", source_id=body.playlist_id), user, s)
+            if not extra or any(not t.get("duration_s") for t in extra):
+                raise HTTPException(409, "В плейлисте нет треков с известной длительностью")
+            if len(extra) + count > 5000:
+                raise HTTPException(409, "В очередь можно добавить не более 5000 треков")
+            # Preserve the live position even if reading Navidrome took time.
+            current, position, _ = on_air(p, utcnow())
+            p.tracks_json = [*tracks, *[TrackOut.model_validate(t).model_dump(mode="json") for t in extra]]
+            anchor(p, current, position, utcnow())
+        p.revision += 1
+        await s.commit()
+        return queue_out(p)
 
 
 @router.get("/{token}/audio/{index}")
@@ -260,6 +377,8 @@ async def audio(token: str, index: int, request: Request, v: str,
     from app.api.listen import media_response
 
     p = await find(s, token, "radio")
+    if p.paused_at is not None:
+        raise HTTPException(409, "Эфир на паузе")
     current, _, _ = on_air(p, utcnow())
     if index != current:
         raise HTTPException(409, "В эфире уже следующая песня")

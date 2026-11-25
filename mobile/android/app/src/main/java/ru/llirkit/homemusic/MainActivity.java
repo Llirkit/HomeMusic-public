@@ -211,6 +211,7 @@ public final class MainActivity extends Activity {
         if (json == null || json.length() > 4096) return;
         ui(() -> dispatchOnline(json, 0));
       }
+      @JavascriptInterface public int soundVersion() { return 1; }
     }, "SpotikRadio");
     web.addJavascriptInterface(new Object() {
       @JavascriptInterface public void shareText(String text) {

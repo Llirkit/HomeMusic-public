@@ -4,7 +4,7 @@ const song = (n) => ({ ref: `nd:s${n}`, source: 'nd', id: `s${n}`, nd_song_id: `
 const token = 'abcdefghijklmnopqrstuvwx12345678';
 
 async function backend(page, signedIn = true) {
-  const state = { signedIn, requests: [], links: [], current: song(1), position: 42, revoked: false };
+  const state = { signedIn, requests: [], links: [], current: song(1), position: 42, revoked: false, canManage: false, paused: false, revision: 0, controls: [], tracks: [song(1), song(2)] };
   const publication = { id: token, title: 'Дорога', kind: 'share', owner: true, active: true, source_kind: 'playlist', url: `http://127.0.0.1:5174/#/shared/${token}` };
   await page.route('**/api/**', async (route) => {
     const req = route.request(), path = new URL(req.url()).pathname;
@@ -21,9 +21,22 @@ async function backend(page, signedIn = true) {
       state.links = [value]; return json(value);
     }
     if (path === '/api/publications') return json(state.links);
+    const queue = () => ({ tracks: state.tracks, index: state.tracks.findIndex(t => t.ref === state.current.ref), position_s: state.position, paused: state.paused, revision: state.revision });
+    if (path.endsWith('/manage')) return json(queue());
+    if (path.endsWith('/control')) {
+      const body = req.postDataJSON(); state.controls.push(body);
+      if (body.revision !== state.revision) return json({ detail: 'Эфир уже изменился' }, 409);
+      if (body.action === 'pause') state.paused = true;
+      if (body.action === 'resume') state.paused = false;
+      if (body.action === 'next') { state.current = state.tracks[1]; state.position = 0; }
+      if (body.action === 'move') state.tracks.splice(body.to_index, 0, state.tracks.splice(body.index, 1)[0]);
+      if (body.action === 'remove') state.tracks.splice(body.index, 1);
+      if (body.action === 'add_playlist') state.tracks.push(song(3));
+      state.revision++; return json(queue());
+    }
     if (path.endsWith('/radio')) {
       if (state.revoked) return json({ detail: 'Ссылка недоступна или отозвана' }, 404);
-      return json({ ...publication, kind: 'radio', track: state.current, position_s: state.position, duration_s: 180,
+      return json({ ...publication, kind: 'radio', track: state.current, position_s: state.position, duration_s: 180, can_manage: state.canManage, paused: state.paused, revision: state.revision, index: state.tracks.findIndex(t => t.ref === state.current.ref), queue_count: state.tracks.length,
         stream_url: `/api/publications/${token}/audio/${state.current.id}?v=${state.current.ref}` });
     }
     if (path === `/api/publications/${token}` && req.method() === 'DELETE') { state.links = []; state.revoked = true; return json({ ok: true }); }
@@ -139,7 +152,7 @@ test('Android radio uses the native service and does not start HTML audio', asyn
   await backend(page, false);
   await page.goto(`/#/radio/${token}`);
   await page.getByRole('button', { name: 'Слушать эфир', exact: true }).click();
-  expect(await page.evaluate(() => window.radioCommands.at(-1))).toEqual({ op: 'radio', id: `radio:${token}`, token });
+  expect(await page.evaluate(() => window.radioCommands.find(c => c.op === 'radio'))).toMatchObject({ op: 'radio', id: `radio:${token}`, token, volume: 0.65, eq_enabled: false });
   await page.evaluate((id) => window.hmAndroidRadio({ id, state: 3, playing: true, playWhenReady: true }), `radio:${token}`);
   await page.getByRole('button', { name: 'Отключиться от эфира' }).click();
   expect(await page.evaluate(() => window.radioCommands.at(-1).op)).toBe('stop');
@@ -161,5 +174,117 @@ test('Windows radio toolbar toggles the broadcast without next and previous comm
   await page.evaluate(() => window.toolbarCommand('toggle'));
   await expect(page.getByRole('button', { name: 'Слушать эфир', exact: true })).toBeVisible();
   await page.evaluate(() => window.toolbarCommand('toggle'));
+  await expect(page.getByRole('button', { name: 'Отключиться от эфира', exact: true })).toBeVisible();
+});
+
+test('full player for a daily mix creates radio from the playing mix', async ({ page }) => {
+  await fakeMedia(page);
+  const state = await backend(page);
+  await page.goto('/#/mix/1');
+  await page.getByRole('button', { name: 'Слушать всё', exact: true }).click();
+  await page.getByTitle('Открыть плеер', { exact: true }).click();
+  await expect(page).toHaveURL(/\/player/);
+  await page.getByRole('button', { name: 'Создать онлайн-радио', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Радио создано' })).toBeVisible();
+  expect(state.requests).toEqual([{ kind: 'radio', source_kind: 'mix', source_id: '1' }]);
+});
+
+test('listener controls personal volume, output and equalizer without broadcast controls', async ({ page }) => {
+  await fakeMedia(page);
+  await page.addInitScript(() => {
+    window.audioRoutes = [];
+    HTMLMediaElement.prototype.setSinkId = async function (id) { window.audioRoutes.push({ tag: this.tagName, id }); };
+    navigator.mediaDevices.enumerateDevices = async () => [{ kind: 'audiooutput', deviceId: 'headphones', label: 'Наушники' }];
+    AudioContext.prototype.setSinkId = async function () {};
+    const original = AudioContext.prototype.createBiquadFilter;
+    window.radioFilters = [];
+    AudioContext.prototype.createBiquadFilter = function () { const f = original.call(this); window.radioFilters.push(f); return f; };
+  });
+  const state = await backend(page, false);
+  await page.goto(`/#/radio/${token}`);
+  await expect(page.getByRole('slider', { name: 'Громкость радио', exact: true })).toHaveValue('65');
+  await expect(page.getByRole('progressbar', { name: 'Ход текущей песни в эфире' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Управление эфиром' })).toHaveCount(0);
+  const volume = page.getByRole('slider', { name: 'Громкость радио', exact: true });
+  await volume.focus(); await page.keyboard.press('Home'); await page.keyboard.press('ArrowRight');
+  expect(await page.locator('audio').evaluate(a => a.volume)).toBeCloseTo(0.01);
+  await page.getByRole('button', { name: 'Выключить звук', exact: true }).click();
+  expect(await page.locator('audio').evaluate(a => a.volume)).toBe(0);
+  await page.getByRole('button', { name: 'Включить звук', exact: true }).click();
+  await page.getByRole('button', { name: 'Аудиовыход', exact: true }).click();
+  await page.getByLabel('Устройство', { exact: true }).selectOption('headphones');
+  await expect.poll(() => page.evaluate(() => window.audioRoutes.some(r => r.tag === 'AUDIO' && r.id === 'headphones'))).toBe(true);
+  await page.keyboard.press('Escape');
+  await page.getByText('Эквалайзер', { exact: true }).click();
+  await page.getByRole('checkbox', { name: 'Включить эквалайзер', exact: true }).check();
+  await page.getByRole('slider', { name: 'Эквалайзер 60 Гц', exact: true }).focus();
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(() => page.evaluate(() => window.radioFilters[0]?.gain.value)).toBe(1);
+  await page.getByRole('button', { name: 'Слушать эфир', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Отключиться от эфира', exact: true })).toBeVisible();
+  expect(state.controls).toEqual([]);
+  await page.reload();
+  await expect(volume).toHaveValue('1');
+  await page.getByText('Эквалайзер', { exact: true }).click();
+  await expect(page.getByRole('checkbox', { name: 'Включить эквалайзер', exact: true })).toBeChecked();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('manager pauses shared broadcast, changes order and adds playlist tracks', async ({ page }) => {
+  await fakeMedia(page);
+  const state = await backend(page);
+  state.canManage = true;
+  await page.goto(`/#/radio/${token}`);
+  const management = page.getByRole('region', { name: 'Управление эфиром', exact: true });
+  await expect(management.getByRole('listitem')).toHaveCount(2);
+  await management.getByRole('button', { name: 'Пауза эфира', exact: true }).click();
+  await expect(page.getByText('Эфир на паузе', { exact: true })).toBeVisible();
+  await management.getByRole('button', { name: 'Продолжить эфир', exact: true }).click();
+  await expect(page.getByText('Эфир на паузе', { exact: true })).toHaveCount(0);
+  await management.getByRole('button', { name: 'Опустить трек 1', exact: true }).click();
+  await expect(management.getByRole('listitem').first()).toContainText('Песня 2');
+  await management.getByRole('button', { name: 'Добавить из плейлиста', exact: true }).click();
+  await management.getByLabel('Плейлист для добавления в эфир', { exact: true }).selectOption('p1');
+  await management.getByRole('button', { name: 'Добавить треки в эфир', exact: true }).click();
+  await expect(management.getByRole('listitem')).toHaveCount(3);
+  await management.getByRole('button', { name: 'Убрать трек 3 из эфира', exact: true }).click();
+  await expect(management.getByRole('listitem')).toHaveCount(2);
+  expect(state.controls.map(c => c.action)).toEqual(['pause', 'resume', 'move', 'add_playlist', 'remove']);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('paused broadcast keeps listener connected and resumes at the shared position', async ({ page }) => {
+  await fakeMedia(page);
+  const state = await backend(page, false);
+  state.paused = true;
+  await page.goto(`/#/radio/${token}`);
+  await page.getByRole('button', { name: 'Слушать эфир', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Отключиться от эфира', exact: true })).toBeVisible();
+  expect(await page.locator('audio').evaluate(a => a.paused)).toBe(true);
+  state.paused = false;
+  await expect.poll(() => page.locator('audio').evaluate(a => a.paused)).toBe(false);
+  await page.getByRole('button', { name: 'Отключиться от эфира', exact: true }).click();
+  expect(await page.locator('audio').evaluate(a => a.paused)).toBe(true);
+});
+
+test('native radio receives personal sound settings and preserves connection during shared pause', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.radioCommands = [];
+    window.SpotikRadio = { soundVersion: () => 1, command: text => window.radioCommands.push(JSON.parse(text)) };
+    window.SpotikOffline = { showAudioOutput: () => { window.outputOpened = true; } };
+  });
+  const state = await backend(page, false);
+  await page.goto(`/#/radio/${token}`);
+  await page.getByRole('button', { name: 'Слушать эфир', exact: true }).click();
+  await page.evaluate((id) => window.hmAndroidRadio({ id, state: 3, playing: false, playWhenReady: false, radioConnected: true, eqSupported: true }), `radio:${token}`);
+  await expect(page.getByRole('button', { name: 'Отключиться от эфира', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Аудиовыход', exact: true }).click();
+  expect(await page.evaluate(() => window.outputOpened)).toBe(true);
+  await page.getByText('Эквалайзер', { exact: true }).click();
+  await page.getByRole('checkbox', { name: 'Включить эквалайзер', exact: true }).check();
+  expect(await page.evaluate(() => window.radioCommands.at(-1))).toMatchObject({ op: 'equalizer', eq_enabled: true, eq_gains: [0, 0, 0, 0, 0] });
+  state.paused = true;
+  await expect(page.getByText('Эфир на паузе', { exact: true })).toBeVisible({ timeout: 10000 });
+  expect(await page.evaluate(() => window.radioCommands.some(c => c.op === 'pause'))).toBe(false);
   await expect(page.getByRole('button', { name: 'Отключиться от эфира', exact: true })).toBeVisible();
 });

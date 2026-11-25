@@ -27,7 +27,9 @@ public final class PlaybackService extends MediaSessionService {
   private int cycle;
   private String radioToken = "", radioUrl = "";
   private int radioGeneration;
-  private boolean radioBusy;
+  private boolean radioBusy, radioListening, radioPaused;
+  private float radioVolume = 0.65f;
+  private final RadioEqualizer radioEqualizer = new RadioEqualizer();
   private long radioNextAt;
   private final ExecutorService radioNetwork = Executors.newSingleThreadExecutor();
   private volatile String currentStream = "";
@@ -65,6 +67,13 @@ public final class PlaybackService extends MediaSessionService {
         currentStream = item != null && item.localConfiguration != null ? item.localConfiguration.uri.toString() : "";
         if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) cycle++;
       }
+      @Override public void onAudioSessionIdChanged(int id) {
+        if (isRadio()) { radioEqualizer.attach(id); applyRadioVolume(); }
+      }
+      @Override public void onPlayWhenReadyChanged(boolean ready, int reason) {
+        if (isRadio() && !radioPaused) radioListening = ready;
+        if (isRadio() && radioPaused && ready) player.pause();
+      }
       @Override public void onEvents(Player p, Player.Events events) { publishOnline(); }
     });
     handler.post(onlineTick);
@@ -79,6 +88,11 @@ public final class PlaybackService extends MediaSessionService {
       onlineId = id;
       radioToken = token;
       radioNextAt = 0;
+      radioListening = true;
+      radioVolume = (float) Math.max(0, Math.min(1, message.optDouble("volume", 0.65)));
+      radioEqualizer.settings(message);
+      radioEqualizer.attach(player.getAudioSessionId());
+      applyRadioVolume();
       player.setPlayWhenReady(true);
       session.setSessionActivity(PendingIntent.getActivity(this, 2, new Intent(this, MainActivity.class), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
       pollRadio();
@@ -105,6 +119,7 @@ public final class PlaybackService extends MediaSessionService {
       }
       boolean load = op.equals("load");
       radioToken = ""; radioUrl = ""; radioGeneration++;
+      radioEqualizer.release(); radioListening = false; radioPaused = false;
       boolean playing = !load && player.getPlayWhenReady();
       long position = load ? Math.max(0, (long) (message.optDouble("position") * 1000)) : player.getCurrentPosition();
       onlineId = id;
@@ -119,10 +134,16 @@ public final class PlaybackService extends MediaSessionService {
       player.prepare();
     } else if (!onlineId.isEmpty() && id.equals(onlineId)) {
       switch (op) {
-        case "play": player.play(); break;
-        case "pause": player.pause(); break;
+        case "play": if (isRadio()) { radioListening = true; radioNextAt = 0; pollRadio(); } else player.play(); break;
+        case "pause": if (isRadio()) radioListening = false; player.pause(); break;
         case "seek": player.seekTo(Math.max(0, (long) (message.optDouble("position") * 1000))); break;
-        case "volume": player.setVolume((float) Math.max(0, Math.min(1, message.optDouble("volume", 1)))); break;
+        case "volume":
+          float volume = (float) Math.max(0, Math.min(1, message.optDouble("volume", 1)));
+          if (isRadio()) { radioVolume = volume; applyRadioVolume(); } else player.setVolume(volume);
+          break;
+        case "equalizer":
+          if (isRadio()) { radioEqualizer.settings(message); radioEqualizer.attach(player.getAudioSessionId()); applyRadioVolume(); }
+          break;
         case "stop": stopOnline(); return;
         default: return;
       }
@@ -131,7 +152,10 @@ public final class PlaybackService extends MediaSessionService {
   }
 
   void stopOnline() {
+    boolean wasRadio = isRadio();
     radioToken = ""; radioUrl = ""; radioGeneration++;
+    radioListening = false; radioPaused = false; radioEqualizer.release();
+    if (wasRadio) player.setVolume(1);
     String previous = onlineId;
     onlineId = "";
     player.stop();
@@ -148,7 +172,7 @@ public final class PlaybackService extends MediaSessionService {
   boolean isRadio() { return !radioToken.isEmpty(); }
 
   private void pollRadio() {
-    if (radioToken.isEmpty() || radioBusy || !player.getPlayWhenReady()
+    if (radioToken.isEmpty() || radioBusy || !radioListening
         || android.os.SystemClock.elapsedRealtime() < radioNextAt) return;
     final String token = radioToken;
     final int generation = radioGeneration;
@@ -168,6 +192,9 @@ public final class PlaybackService extends MediaSessionService {
           radioBusy = false;
           if (generation != radioGeneration || !radioToken.equals(token)) return;
           radioNextAt = android.os.SystemClock.elapsedRealtime() + 3000;
+          radioPaused = broadcast.optBoolean("paused", false);
+          if (radioPaused) { player.pause(); publishOnline(); return; }
+          if (!radioListening) return;
           if (!path.equals(radioUrl) || player.getPlaybackState() == Player.STATE_IDLE || player.getPlayerError() != null) {
             radioUrl = path;
             currentStream = base + path;
@@ -175,6 +202,7 @@ public final class PlaybackService extends MediaSessionService {
             player.setMediaItem(item, position);
             player.prepare();
           } else if (Math.abs(player.getCurrentPosition() - position) > 2500) player.seekTo(position);
+          player.setPlayWhenReady(radioListening);
         });
       } catch (Exception e) {
         handler.post(() -> {
@@ -192,12 +220,15 @@ public final class PlaybackService extends MediaSessionService {
     });
   }
 
+  private void applyRadioVolume() { player.setVolume(radioVolume * radioEqualizer.headroom()); }
+
   private void publishOnline() {
     if (onlineId.isEmpty() || onlineListener == null) return;
     try {
       onlineListener.accept(new JSONObject().put("id", onlineId).put("index", player.getCurrentMediaItemIndex())
           .put("position", player.getCurrentPosition() / 1000d).put("duration", player.getDuration() > 0 ? player.getDuration() / 1000d : 0)
           .put("playing", player.isPlaying()).put("playWhenReady", player.getPlayWhenReady())
+          .put("radioConnected", isRadio() && radioListening).put("eqSupported", radioEqualizer.supported())
           .put("state", player.getPlaybackState()).put("cycle", cycle).put("error", player.getPlayerError() != null).toString());
     } catch (JSONException ignored) { }
   }
@@ -211,6 +242,7 @@ public final class PlaybackService extends MediaSessionService {
   public void onDestroy() {
     radioGeneration++;
     radioNetwork.shutdownNow();
+    radioEqualizer.release();
     handler.removeCallbacks(onlineTick);
     onlineListener = null;
     current = null;

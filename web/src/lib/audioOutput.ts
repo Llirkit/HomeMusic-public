@@ -10,6 +10,7 @@ try { saved = localStorage.getItem(KEY) ?? ''; } catch { /* optional storage */ 
 let state: OutputState = { selected: saved, devices: [], busy: false, error: '' };
 const subscribers = new Set<() => void>();
 let audio: HTMLAudioElement | null = null;
+let extraRoute: ((id: string) => Promise<void>) | undefined;
 let listening = false;
 let refreshId = 0;
 let restoring: Promise<void> = Promise.resolve();
@@ -33,7 +34,10 @@ function save(id: string) {
 async function route(id: string) {
   if (audio) await audio.setSinkId(id);
   await setLoudnessOutput(id);
+  await extraRoute?.(id);
 }
+
+export const selectedAudioOutput = () => state.selected;
 
 export async function selectAudioOutput(id: string) {
   if (state.busy || !supportsAudioOutput()) return;
@@ -89,9 +93,17 @@ export async function requestAudioDeviceAccess() {
 }
 
 /** Register the one audio element; its output survives track and queue changes. */
-export function attachAudioOutput(element: HTMLAudioElement) {
+export function attachAudioOutput(element: HTMLAudioElement, sink?: (id: string) => Promise<void>) {
+  const previous = audio;
+  const previousRoute = extraRoute;
   audio = element;
-  if (!supportsAudioOutput()) return;
+  extraRoute = sink;
+  const detach = () => {
+    if (audio !== element) return;
+    audio = previous; extraRoute = previousRoute;
+    if (audio && supportsAudioOutput()) restoring = route(state.selected).catch(() => {});
+  };
+  if (!supportsAudioOutput()) return detach;
   if (state.selected) {
     restoring = route(state.selected).catch(async () => {
       await route('').catch(() => {});
@@ -111,4 +123,5 @@ export function attachAudioOutput(element: HTMLAudioElement) {
       });
     });
   }
+  return detach;
 }

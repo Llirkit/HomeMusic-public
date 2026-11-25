@@ -175,3 +175,63 @@ async def test_wave_radio_owns_its_session_and_refills_once_for_all_listeners(en
         assert first.json() == second.json()
         assert first.json()["track"]["title"] == "Следующая"
         assert refills == ["radio-wave"]
+
+
+async def test_radio_manager_permissions_clock_and_edits(env, playlist, monkeypatch):
+    from app.api import publications
+    from app.db import session_scope
+    from app.models import User
+    from tests.test_mixes import user_id
+
+    c = env["client"]
+    p = await publish(c, "radio")
+    url = f"/api/publications/{p['id']}"
+    now = utcnow()
+    async with session_scope() as s:
+        row = await s.get(Publication, p["id"])
+        row.started_at = now - timedelta(seconds=42)
+    monkeypatch.setattr(publications, "utcnow", lambda: now)
+    async with app_client(env["app"], login=None) as guest, app_client(env["app"], login=("alice", "pw")) as other:
+        assert not (await guest.get(url + "/radio")).json()["can_manage"]
+        assert (await guest.get(url + "/manage")).status_code == 401
+        assert (await guest.post(url + "/control", json={"action": "next", "revision": 0})).status_code == 401
+        assert (await other.get(url + "/manage")).status_code == 403
+        assert (await other.post(url + "/control", json={"action": "pause", "revision": 0})).status_code == 403
+        assert (await c.get(url + "/radio")).json()["can_manage"]
+        paused = await c.post(url + "/control", json={"action": "pause", "revision": 0})
+        assert paused.status_code == 200, paused.text
+        assert paused.json()["position_s"] == 42
+        monkeypatch.setattr(publications, "utcnow", lambda: now + timedelta(seconds=600))
+        broadcast = (await guest.get(url + "/radio")).json()
+        assert broadcast["paused"] and broadcast["position_s"] == 42
+        assert (await guest.get(url + "/audio/0?v=nd:song1")).status_code == 409
+        assert (await c.post(url + "/control", json={"action": "next", "revision": 0})).status_code == 409
+        resumed = (await c.post(url + "/control", json={"action": "resume", "revision": 1})).json()
+        assert not resumed["paused"] and resumed["position_s"] == 42
+        moved = (await c.post(url + "/control", json={"action": "move", "revision": 2, "index": 0, "to_index": 1})).json()
+        assert moved["index"] == 1 and moved["position_s"] == 42
+        assert moved["tracks"][1]["title"] == "Первая"
+        removed = (await c.post(url + "/control", json={"action": "remove", "revision": 3, "index": 0})).json()
+        assert removed["index"] == 0 and removed["position_s"] == 42
+        assert (await c.post(url + "/control", json={"action": "remove", "revision": 4, "index": 0})).status_code == 409
+        assert (await c.post(url + "/control", json={"action": "seek", "revision": 4, "position_s": 120})).status_code == 400
+        seek = (await c.post(url + "/control", json={"action": "seek", "revision": 4, "position_s": 50})).json()
+        assert seek["position_s"] == 50
+        added = await c.post(url + "/control", json={"action": "add_playlist", "revision": 5, "playlist_id": "p1"})
+        assert added.status_code == 200, added.text
+        assert len(added.json()["tracks"]) == 3 and added.json()["position_s"] == 50
+        # An administrator can manage a station created by a different user.
+        alice = await user_id("alice")
+        async with session_scope() as s:
+            owner = await s.get(User, alice)
+            assert not owner.is_admin
+            row = await s.get(Publication, p["id"])
+            row.user_id = alice
+        assert (await other.get(url + "/radio")).json()["can_manage"]
+        assert (await other.get(url + "/manage")).status_code == 200
+        assert (await c.get(url + "/manage")).status_code == 200
+        assert p["id"] in [x["id"] for x in (await c.get("/api/publications")).json()]
+        assert (await c.post(url + "/control", json={"action": "next", "revision": 6})).json()["index"] == 1
+        assert (await other.post(url + "/control", json={"action": "previous", "revision": 7})).json()["index"] == 0
+        assert (await c.delete(url)).status_code == 200
+        assert (await other.get(url + "/manage")).status_code == 404
