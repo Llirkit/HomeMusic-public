@@ -29,6 +29,8 @@ async function backend(page, signedIn = true) {
     if (path === `/api/publications/${token}` && req.method() === 'DELETE') { state.links = []; state.revoked = true; return json({ ok: true }); }
     if (path === `/api/publications/${token}`) return state.signedIn ? json({ ...publication, owner: false, tracks: [song(1), song(2)] }) : json({ detail: 'Требуется вход' }, 401);
     if (path === '/api/playlists/p1') return json({ id: 'p1', name: 'Дорога', song_count: 2, duration_s: 360, tracks: [song(1), song(2)] });
+    if (path === '/api/playlists') return json([{ id: 'p1', name: 'Дорога', song_count: 2, duration_s: 360 }, { id: 'empty', name: 'Пустой', song_count: 0, duration_s: 0 }]);
+    if (path === '/api/mixes/1') return json({ id: 1, title: 'Микс дня', description: 'Любимые песни', mode: 'normal', mode_title: 'Обычный', created_at: '2026-11-25T00:00:00', ready: 2, total: 2, tracks: [song(1), song(2)], generators: {} });
     if (path === '/api/mixes/today') return json({ mix: null, building: false, onboarding: false, settings: { mode: 'normal', mix_hour: 5, artists: [] } });
     if (path === '/api/starred') return json({ song_ids: [], album_ids: [], artist_ids: [], refs: [], subjects: [] });
     if (path === '/api/disliked') return json({ refs: [], artists: [], subjects: [] });
@@ -64,6 +66,28 @@ test('share playlist, copy its link, close with Escape and create public radio',
   await page.getByRole('button', { name: 'Создать онлайн-радио' }).click();
   await expect(page.getByRole('dialog', { name: 'Радио создано' })).toBeVisible();
   expect(state.requests).toEqual([{ kind: 'share', source_kind: 'playlist', source_id: 'p1' }, { kind: 'radio', source_kind: 'playlist', source_id: 'p1' }]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('daily mix offers radio next to sharing and creates a station from the mix', async ({ page }) => {
+  const state = await backend(page);
+  await page.goto('/#/mix/1');
+  await expect(page.getByRole('button', { name: 'Поделиться', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Создать онлайн-радио', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Радио создано' })).toBeVisible();
+  expect(state.requests).toEqual([{ kind: 'radio', source_kind: 'mix', source_id: '1' }]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('playlist list offers radio directly, while an empty playlist cannot start a station', async ({ page }) => {
+  const state = await backend(page);
+  await page.goto('/#/playlists');
+  const road = page.getByRole('listitem').filter({ has: page.getByRole('link', { name: /Дорога/ }) });
+  const empty = page.getByRole('listitem').filter({ has: page.getByRole('link', { name: /Пустой/ }) });
+  await expect(empty.getByRole('button', { name: 'Создать онлайн-радио' })).toBeDisabled();
+  await road.getByRole('button', { name: 'Создать онлайн-радио' }).click();
+  await expect(page.getByRole('dialog', { name: 'Радио создано' })).toBeVisible();
+  expect(state.requests).toEqual([{ kind: 'radio', source_kind: 'playlist', source_id: 'p1' }]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 

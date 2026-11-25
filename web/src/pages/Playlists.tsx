@@ -1,6 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../api/client';
 import { Icon } from '../components/Icon';
+import { PublicationActions } from '../components/PublicationActions';
 import { Button, Empty, ErrorState, PageHeader, SkeletonRows } from '../components/ui';
 import { fmtLength, tracksWord } from '../lib/format';
 import { STANDALONE } from '../lib/embedded';
@@ -59,6 +60,7 @@ export function PlaylistsPage() {
               </span>
               {STANDALONE && <Icon name="chevron" size={18} className="text-dim" />}
               </PlaylistRow>
+              <div className="px-4 pb-3"><PublicationActions sourceKind="playlist" sourceId={p.id} share={false} disabled={!p.song_count} /></div>
             </li>
           ))}
         </ul>

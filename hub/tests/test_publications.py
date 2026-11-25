@@ -77,7 +77,7 @@ async def test_radio_common_clock_repeat_scope_and_revoke(env, playlist, monkeyp
 async def test_empty_invalid_missing_and_station_limit(env, playlist):
     c = env["client"]
     assert (await c.post("/api/publications", json={"source_kind": "playlist", "source_id": "empty"})).status_code == 409
-    assert (await c.post("/api/publications", json={"kind": "radio", "source_kind": "mix", "source_id": "1"})).status_code == 400
+    assert (await c.post("/api/publications", json={"kind": "radio", "source_kind": "track", "source_id": "dz:100"})).status_code == 400
     assert (await c.post("/api/publications", json={"source_kind": "mix", "source_id": "not-a-number"})).status_code == 404
     assert (await c.get("/api/publications/missing")).status_code == 404
     for i in range(3):
@@ -122,11 +122,18 @@ async def test_track_and_mix_snapshots_are_readable_after_login_and_hide_scoring
         s.add(MixItem(mix_id=mix_id, position=0, state="active", ref=track.ref, generator="favorites",
                       score=123, features_json={"track": track.model_dump(mode="json")}))
     published = await publish(env["client"], source_kind="mix", source_id=str(mix_id))
+    station = await publish(env["client"], kind="radio", source_kind="mix", source_id=str(mix_id))
+    assert (await publish(env["client"], kind="radio", source_kind="mix", source_id=str(mix_id)))["id"] == station["id"]
+    async with app_client(env["app"], login=None) as guest:
+        radio = await guest.get(f"/api/publications/{station['id']}/radio")
+        assert radio.status_code == 200, radio.text
+        assert radio.json()["track"]["title"] == track.title
     async with app_client(env["app"], login=("alice", "pw")) as other:
         data = (await other.get(f"/api/publications/{published['id']}")).json()
         assert data["title"] == "Личный микс"
         assert "score" not in data["tracks"][0]
         assert (await other.post("/api/publications", json={"source_kind": "mix", "source_id": str(mix_id)})).status_code == 404
+        assert (await other.post("/api/publications", json={"kind": "radio", "source_kind": "mix", "source_id": str(mix_id)})).status_code == 404
 
 
 async def test_wave_radio_owns_its_session_and_refills_once_for_all_listeners(env, monkeypatch):

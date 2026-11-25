@@ -99,8 +99,8 @@ async def source(body: CreateIn, user: User, s: AsyncSession):
 async def create(body: CreateIn, request: Request, user: User = Depends(current_user),
                  s: AsyncSession = Depends(get_session, scope="function")):
     async with _lock:
-        if body.kind == "radio" and body.source_kind not in ("wave", "playlist"):
-            raise HTTPException(400, "Создайте радио из волны или плейлиста")
+        if body.kind == "radio" and body.source_kind not in ("wave", "playlist", "mix"):
+            raise HTTPException(400, "Создайте радио из волны, плейлиста или микса")
         previous = (await s.scalars(select(Publication).where(
             Publication.user_id == user.id, Publication.kind == body.kind, Publication.source_kind == body.source_kind,
             Publication.source_id == body.source_id, Publication.active.is_(True)))).all()

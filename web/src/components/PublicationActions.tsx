@@ -27,7 +27,7 @@ export function PublicationLink({ publication: p }: { publication: Publication }
   </div>;
 }
 
-export function PublicationActions({ sourceKind, sourceId, disabled, radio = false, share = true, inline = false }: {
+export function PublicationActions({ sourceKind, sourceId, disabled, radio = sourceKind === 'playlist' || sourceKind === 'mix', share = true, inline = false }: {
   sourceKind: 'track' | 'playlist' | 'mix' | 'wave'; sourceId: string; disabled?: boolean; radio?: boolean; share?: boolean; inline?: boolean;
 }) {
   const [busy, setBusy] = useState<string>();
