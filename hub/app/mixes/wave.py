@@ -1033,6 +1033,17 @@ async def next_batch(user: User, sid: str, played: list[Any], queued: list[str])
     return Batch(sid, title_of(seed_json), rt.mode, seed_json, tracks, pending, recorded)
 
 
+async def radio_batch(user: User, sid: str) -> Batch:
+    """Advance an independent broadcast without creating fictitious personal play events."""
+    rt = await _runtime(sid, user)
+    async with rt.lock:
+        for candidate in list(rt.state.out.values()):
+            _start(rt.state, candidate)
+        if len(rt.state.pool) < POOL_LOW:
+            _refill(sid, rt)
+    return await next_batch(user, sid, [], [])
+
+
 async def _hand_out(sid: str, rt: Runtime, queued: set[str], first: build.Cand | None = None) -> list[build.Cand]:
     """Picks the next batch; it becomes the client's queue (the rest of the old one goes back to the pool). Their
     files are picked by the Hub now."""

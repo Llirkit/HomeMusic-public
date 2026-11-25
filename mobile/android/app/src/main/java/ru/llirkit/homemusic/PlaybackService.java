@@ -13,6 +13,8 @@ import androidx.media3.session.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import org.json.*;
 
 @androidx.media3.common.util.UnstableApi
@@ -23,10 +25,15 @@ public final class PlaybackService extends MediaSessionService {
   private ExoPlayer player;
   private String onlineId = "";
   private int cycle;
+  private String radioToken = "", radioUrl = "";
+  private int radioGeneration;
+  private boolean radioBusy;
+  private long radioNextAt;
+  private final ExecutorService radioNetwork = Executors.newSingleThreadExecutor();
   private volatile String currentStream = "";
   private final Handler handler = new Handler(Looper.getMainLooper());
   private final Runnable onlineTick = new Runnable() {
-    @Override public void run() { publishOnline(); handler.postDelayed(this, 1000); }
+    @Override public void run() { publishOnline(); pollRadio(); handler.postDelayed(this, 1000); }
   };
 
   @Override
@@ -65,6 +72,18 @@ public final class PlaybackService extends MediaSessionService {
 
   void onlineCommand(JSONObject message) throws JSONException {
     String op = message.getString("op"), id = message.optString("id");
+    if (op.equals("radio")) {
+      String token = message.getString("token");
+      if (!token.matches("[A-Za-z0-9_-]{20,48}") || !id.equals("radio:" + token)) return;
+      stopOnline();
+      onlineId = id;
+      radioToken = token;
+      radioNextAt = 0;
+      player.setPlayWhenReady(true);
+      session.setSessionActivity(PendingIntent.getActivity(this, 2, new Intent(this, MainActivity.class), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
+      pollRadio();
+      return;
+    }
     if (op.equals("load") || op.equals("queue")) {
       if (op.equals("queue") && !id.equals(onlineId)) return;
       JSONArray tracks = message.getJSONArray("queue");
@@ -85,6 +104,7 @@ public final class PlaybackService extends MediaSessionService {
             .setUri(base + "/api/listen/stream?ref=" + Api.encode(ref)).setMediaMetadata(metadata.build()).build());
       }
       boolean load = op.equals("load");
+      radioToken = ""; radioUrl = ""; radioGeneration++;
       boolean playing = !load && player.getPlayWhenReady();
       long position = load ? Math.max(0, (long) (message.optDouble("position") * 1000)) : player.getCurrentPosition();
       onlineId = id;
@@ -111,6 +131,7 @@ public final class PlaybackService extends MediaSessionService {
   }
 
   void stopOnline() {
+    radioToken = ""; radioUrl = ""; radioGeneration++;
     String previous = onlineId;
     onlineId = "";
     player.stop();
@@ -124,6 +145,51 @@ public final class PlaybackService extends MediaSessionService {
   }
 
   boolean isOnline() { return !onlineId.isEmpty(); }
+
+  private void pollRadio() {
+    if (radioToken.isEmpty() || radioBusy || !player.getPlayWhenReady()
+        || android.os.SystemClock.elapsedRealtime() < radioNextAt) return;
+    final String token = radioToken;
+    final int generation = radioGeneration;
+    final String base = getSharedPreferences("app", MODE_PRIVATE).getString("server", BuildConfig.SERVER_URL);
+    radioBusy = true;
+    radioNetwork.execute(() -> {
+      try {
+        JSONObject broadcast = new JSONObject(Api.text(base, "/api/publications/" + token + "/radio"));
+        String path = broadcast.getString("stream_url");
+        if (!path.startsWith("/api/publications/" + token + "/audio/")) throw new IllegalArgumentException("Неверный адрес эфира");
+        JSONObject track = broadcast.getJSONObject("track");
+        long position = Math.max(0, (long) (broadcast.getDouble("position_s") * 1000));
+        MediaMetadata metadata = new MediaMetadata.Builder().setTitle(track.optString("title"))
+            .setArtist(track.optString("artist")).setAlbumTitle(broadcast.optString("title")).build();
+        MediaItem item = new MediaItem.Builder().setMediaId("radio:" + token).setUri(base + path).setMediaMetadata(metadata).build();
+        handler.post(() -> {
+          radioBusy = false;
+          if (generation != radioGeneration || !radioToken.equals(token)) return;
+          radioNextAt = android.os.SystemClock.elapsedRealtime() + 3000;
+          if (!path.equals(radioUrl) || player.getPlaybackState() == Player.STATE_IDLE || player.getPlayerError() != null) {
+            radioUrl = path;
+            currentStream = base + path;
+            player.setRepeatMode(Player.REPEAT_MODE_OFF);
+            player.setMediaItem(item, position);
+            player.prepare();
+          } else if (Math.abs(player.getCurrentPosition() - position) > 2500) player.seekTo(position);
+        });
+      } catch (Exception e) {
+        handler.post(() -> {
+          radioBusy = false;
+          if (generation != radioGeneration || !radioToken.equals(token)) return;
+          radioNextAt = android.os.SystemClock.elapsedRealtime() + 5000;
+          player.stop();
+          if (String.valueOf(e.getMessage()).contains("HTTP 404")) stopOnline();
+          else if (onlineListener != null) {
+            try { onlineListener.accept(new JSONObject().put("id", onlineId).put("state", -2).toString()); }
+            catch (JSONException ignored) { }
+          }
+        });
+      }
+    });
+  }
 
   private void publishOnline() {
     if (onlineId.isEmpty() || onlineListener == null) return;
@@ -142,6 +208,8 @@ public final class PlaybackService extends MediaSessionService {
 
   @Override
   public void onDestroy() {
+    radioGeneration++;
+    radioNetwork.shutdownNow();
     handler.removeCallbacks(onlineTick);
     onlineListener = null;
     current = null;

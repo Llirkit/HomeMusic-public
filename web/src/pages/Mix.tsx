@@ -3,6 +3,7 @@ import { ApiError, api } from '../api/client';
 import type { CatalogArtist, MixMode, MixOut, MixSettingsOut, MixTodayOut, MixTrackOut } from '../api/types';
 import { TrackRow, listenTrack } from '../components/catalog';
 import { Icon } from '../components/Icon';
+import { PublicationActions } from '../components/PublicationActions';
 import { Button, Cover, ErrorState, IconButton, PageHeader, ProgressBar, Segmented, SkeletonRows, Spinner, cx } from '../components/ui';
 import { fmtLength, plural } from '../lib/format';
 import { useHubEvent } from '../lib/events';
@@ -276,6 +277,7 @@ export function MixPage({ id }: { id: number }) {
       </div>
 
       <div className="px-4 pb-2">{playAll && <Button variant="primary" icon="play" block onClick={playAll}>Слушать всё</Button>}</div>
+      <div className="px-4 pb-2"><PublicationActions sourceKind="mix" sourceId={String(id)} disabled={!tracks.length} /></div>
 
       {current && <MixModes settings={settings} busy={modeBusy} building={building} onMode={setMode} onRebuild={rebuild} />}
       {res.error && <ErrorState text="Не удалось обновить статус микса" onRetry={() => res.reload(true)} />}

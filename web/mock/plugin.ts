@@ -6,6 +6,7 @@ import type { FavoriteSubject, FavoriteTarget } from '../src/api/types.ts';
 import { insightsMock } from './insights.ts';
 
 type Json = Record<string, unknown>;
+const publications = new Map<string, { id: string; title: string; kind: string; source_kind: string; source_id: string; active: boolean; owner: boolean; url: string; tracks: Json[]; started: number }>();
 
 const now = () => new Date().toISOString();
 let searchHistory: string[] = [];
@@ -951,6 +952,35 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<boolea
     Object.assign(inv, { status: 'used', used_at: now().slice(0, 19), used_by: String(b.username) });
     res.setHeader('Set-Cookie', 'hm_session=mock; Path=/; HttpOnly; SameSite=Lax');
     return send(res, 200, { id: 5, username: String(b.username), is_admin: false, public_music_url: 'https://203.0.113.10:8444' }), true;
+  }
+  // Sharing QA uses library songs and generated WAV audio, including a guest radio listener.
+  if (p.startsWith('/api/publications')) {
+    const match = p.match(/^\/api\/publications\/([^/]+)(?:\/(radio|audio)(?:\/(\d+))?)?$/);
+    const publication = match ? publications.get(match[1]) : undefined;
+    if (match?.[2] && publication?.kind === 'radio' && publication.active) {
+      let position = (Date.now() - publication.started) / 1000 % publication.tracks.reduce((sum, t) => sum + Number(t.duration_s), 0);
+      let index = 0;
+      while (position >= Number(publication.tracks[index].duration_s) && index < publication.tracks.length - 1) position -= Number(publication.tracks[index++].duration_s);
+      const track = publication.tracks[index];
+      if (match[2] === 'audio') return sendRange(req, res, wav(Number(track.duration_s), String(track.title)), 'audio/wav'), true;
+      return send(res, 200, { ...publication, track, position_s: position, duration_s: track.duration_s, stream_url: `/api/publications/${publication.id}/audio/${index}?v=${encodeURIComponent(String(track.ref))}` }), true;
+    }
+    if (!authed) return send(res, 401, { detail: 'Требуется вход' }), true;
+    if (!match && m === 'GET') return send(res, 200, [...publications.values()].filter((v) => v.active)), true;
+    if (!match && m === 'POST') {
+      const b = await readJson(req);
+      const tracks: Json[] = b.source_kind === 'playlist'
+        ? (playlistSongs.get(String(b.source_id)) ?? []).map(ndSong).filter((t) => !!t).map(ndSongOut)
+        : libTracks.slice(0, b.source_kind === 'track' ? 1 : 5).map(ndSongOut);
+      if (!tracks.length) return send(res, 409, { detail: 'Здесь пока нет треков' }), true;
+      const id = `mock-publication-${publications.size + 1}`;
+      const value = { id, title: b.source_kind === 'playlist' ? playlists.find((v) => v.id === b.source_id)?.name || 'Плейлист' : 'Подборка', kind: String(b.kind), source_kind: String(b.source_kind), source_id: String(b.source_id), active: true, owner: true, tracks, started: Date.now(), url: `http://${req.headers.host}/#/${b.kind === 'radio' ? 'radio' : 'shared'}/${id}` };
+      publications.set(id, value);
+      return send(res, 200, value), true;
+    }
+    if (!publication?.active) return send(res, 404, { detail: 'Ссылка недоступна или отозвана' }), true;
+    if (m === 'DELETE') { publication.active = false; return send(res, 200, { ok: true }), true; }
+    return send(res, 200, publication), true;
   }
   if (!authed) return send(res, 401, { detail: 'Требуется вход' }), true;
 

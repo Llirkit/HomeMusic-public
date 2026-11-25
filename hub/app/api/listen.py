@@ -51,6 +51,11 @@ async def prefetch(body: ListenPrefetchIn, user: User = Depends(current_user)):
 
 @router.get("/stream")
 async def stream(ref: str, request: Request, q: str | None = None, full: bool = False, user: User = Depends(current_user)):
+    return await media_response(ref, request, q=q, full=full, user=user)
+
+
+async def media_response(ref: str, request: Request, *, q: str | None = None, full: bool = False,
+                         user: User, record_listen: bool = True):
     """Audio of the chosen file (Range → 206): the library file, the server copy of the picked file (read while
     it downloads), the copy of a file of a source without plain HTTP audio, or a preview proxied from its source.
     `q=mobile`: the light variant for a metered network (Opus copy of a heavy file, `app.light`); the answer says
@@ -63,7 +68,7 @@ async def stream(ref: str, request: Request, q: str | None = None, full: bool = 
         m = await listen.open_media(ref, rng or None, ahead=ahead, quality=q, full_only=full)
     except listen.ListenError as e:
         raise HTTPException(e.status, str(e)) from e
-    if m.choice.kind == "full" and not ahead and (not rng or rng.startswith("bytes=0-")):
+    if record_listen and m.choice.kind == "full" and not ahead and (not rng or rng.startswith("bytes=0-")):
         from app.imports.core import listened
 
         await listened(user.id, ref)  # a track of an economy import is downloaded once listened to

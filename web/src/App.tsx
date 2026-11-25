@@ -39,6 +39,7 @@ import { PlayerPage } from './pages/Player';
 import { PlaylistsPage } from './pages/Playlists';
 import { SearchPage, searchTab } from './pages/Search';
 import { SharePage } from './pages/Share';
+import { PublicationsPage, RadioPage, SharedMusicPage } from './pages/Publications';
 import { UploadPage } from './pages/Upload';
 
 type RouteDef = [pattern: string, tab: Tab | null, render: (p: Record<string, string>, r: Route) => ReactNode];
@@ -60,6 +61,9 @@ const STANDALONE_ROUTES: RouteDef[] = [
 const START = STANDALONE ? '/home' : '/search';
 
 const ROUTES: RouteDef[] = [
+  ['/shared/:token', null, (p) => <SharedMusicPage key={p.token} token={p.token} />],
+  ['/radio/:token', null, (p) => <RadioPage key={p.token} token={p.token} />],
+  ['/publications', 'more', () => <PublicationsPage />],
   ...(STANDALONE ? STANDALONE_ROUTES : []),
   ['/search', 'search', (_, r) => <SearchPage initialQuery={r.query.get('q') ?? ''} initialTab={searchTab(r.query.get('tab'))} />],
   ['/artist/:ref', 'search', (p) => <ArtistPage key={p.ref} refId={p.ref} />],
@@ -136,8 +140,10 @@ export function App() {
   useEffect(() => {
     const account = me?.id ?? null;
     setListeningAccount(account);
-    restoreListening(account);
-    restoreWave(account);
+    if (!route.path.startsWith('/radio/')) {
+      restoreListening(account);
+      restoreWave(account);
+    }
   }, [me]);
 
   useEffect(() => {
@@ -188,6 +194,9 @@ export function App() {
     updateSession(null);
     navigate(START, { replace: true });
   }, [updateSession]);
+
+  const radio = matchPath('/radio/:token', route.path);
+  if (radio) return <><RadioPage key={radio.token} token={radio.token} /><Overlays /></>;
 
   if (me === undefined) {
     return (

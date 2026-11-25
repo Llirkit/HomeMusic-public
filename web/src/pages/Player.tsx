@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Icon } from '../components/Icon';
+import { PublicationActions } from '../components/PublicationActions';
 import { LikeButton } from '../components/LikeButton';
 import { LyricsButton } from '../components/Lyrics';
 import { AudioOutputButton } from '../components/AudioOutput';
@@ -80,6 +81,7 @@ export function PlayerPage() {
 
   return (
     <div className="pt-safe mx-auto flex min-h-dvh max-w-2xl flex-col">
+      {onWave && <div className="px-4 pt-3"><PublicationActions sourceKind="wave" sourceId={context.slice(5)} radio share={false} /></div>}
       <div className="flex min-h-14 items-center gap-1 px-2">
         <IconButton icon="down" label="Свернуть" onClick={() => goBack('/home')} />
         <div className="min-w-0 flex-1 text-center text-xs uppercase tracking-wide text-muted">{contextLabel(context)}</div>

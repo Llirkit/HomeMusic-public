@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import type { NdAlbumOut, NdArtistOut, NdSongOut } from '../api/types';
 import { playAll, TrackRow } from '../components/catalog';
 import { Icon } from '../components/Icon';
+import { PublicationActions } from '../components/PublicationActions';
 import { LikeButton } from '../components/LikeButton';
 import { Button, Cover, Empty, ErrorState, IconButton, PageHeader, SectionTitle, SkeletonRows, Spinner, cx } from '../components/ui';
 import { fmtLength, tracksWord } from '../lib/format';
@@ -217,6 +218,7 @@ export function PlaylistPage({ id }: { id: string }) {
         sub={[tracksWord(p.song_count), p.duration_s ? fmtLength(p.duration_s) : null].filter(Boolean).join(' · ')}
       />
       <ListActions tracks={p.tracks} context="playlist" />
+      <div className="px-4 pb-3"><PublicationActions sourceKind="playlist" sourceId={id} radio disabled={!p.tracks.length} /></div>
       {p.tracks.length ? (
         <SongList tracks={p.tracks} extra={(t, i) => [{ icon: 'x', label: 'Убрать из плейлиста', onClick: () => void remove(i, t) }]} />
       ) : (

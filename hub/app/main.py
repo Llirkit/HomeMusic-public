@@ -39,6 +39,7 @@ async def lifespan(app: FastAPI):
     db.init_engine()
 
     from app import listen, lyrics
+    from app.api.publications import radio_loop
     from app.housekeeping import scheduler_loop
     from app.jobs.downloads import playlist_adds_loop
     from app.jobs.queue import WorkerPool, recover_stale
@@ -60,6 +61,7 @@ async def lifespan(app: FastAPI):
         tasks.append(asyncio.create_task(scrobbles_loop(), name="scrobbles"))
         tasks.append(asyncio.create_task(schedule_loop(), name="mixes"))
         tasks.append(asyncio.create_task(playlist_adds_loop(), name="playlist-adds"))
+        tasks.append(asyncio.create_task(radio_loop(), name="radio"))
     log.info("hub started")
     try:
         yield
@@ -91,6 +93,7 @@ def create_app() -> FastAPI:
         mixes,
         playlists,
         plays,
+        publications,
         search,
         smart_shuffle,
         system,
@@ -102,7 +105,7 @@ def create_app() -> FastAPI:
                   openapi_url="/api/openapi.json", redoc_url=None)
     for r in (auth.router, search.router, catalog.router, downloads.router, listen.router, library.router, medialib.router,
               uploads.router, playlists.router, plays.router, mixes.router, wave.router, smart_shuffle.router, imports.router, events.router, system.router, admin.router,
-              insights.router, lyrics.router):
+              insights.router, lyrics.router, publications.router):
         app.include_router(r)
     try:
         from app.api import assistant

@@ -525,6 +525,24 @@ class MoodMix(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class Publication(Base):
+    """Revocable links. Radio owns an independent wave and a persisted broadcast clock."""
+
+    __tablename__ = "publications"
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    source_kind: Mapped[str] = mapped_column(String(16))
+    source_id: Mapped[str] = mapped_column(String(256))
+    title: Mapped[str] = mapped_column(String(512))
+    tracks_json: Mapped[list[Any]] = mapped_column(JSON)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    wave_id: Mapped[str | None] = mapped_column(String(32))
+
+
 class WaveSession(Base):
     """One «Моя волна» of a user (MIXES.md 7): the endless stream the Hub picks 5 tracks at a time. `state_json` —
     the pool of candidates, what was handed out and played, the session's skips and likes (`app.mixes.wave`)."""

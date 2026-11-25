@@ -94,6 +94,7 @@ export function MorePage() {
         )}
         <Item icon="upload" to="/upload" title="Загрузить файлы" sub="Свои аудиофайлы с телефона" />
         <Item icon="playlist" to="/playlists" title="Плейлисты" sub="Ваши плейлисты в Navidrome" />
+        <Item icon="radio" to="/publications" title="Мои ссылки и радио" sub="Поделиться музыкой, отозвать ссылку или остановить эфир" />
         <Item icon="transfer" to="/import" title="Перенести музыку" sub="Из Яндекс Музыки и Spotify: ♥, плейлисты, альбомы" />
         {me.is_admin && <Item icon="user" to="/admin" title="Пользователи и приглашения" sub="Расходы на ИИ, песни, коды для новых людей" />}
         {me.is_admin && <SoulseekSettings />}

@@ -147,7 +147,7 @@ public final class MainActivity extends Activity {
             controller = controllerFuture.get();
             if (PlaybackService.current != null) PlaybackService.current.onlineListener =
                 json -> { if (web != null && Identity.sameOrigin(base, web.getUrl()))
-                  web.evaluateJavascript("window.hmAndroidPlayback && window.hmAndroidPlayback(" + json + ")", null); };
+                  web.evaluateJavascript("window.hmAndroidPlayback && window.hmAndroidPlayback(" + json + "); window.hmAndroidRadio && window.hmAndroidRadio(" + json + ")", null); };
             controller.addListener(
                 new Player.Listener() {
                   @Override
@@ -206,6 +206,23 @@ public final class MainActivity extends Activity {
             ui(() -> dispatchOnline(json, 0));
           }
         }, "SpotikPlayback");
+    web.addJavascriptInterface(new Object() {
+      @JavascriptInterface public void command(String json) {
+        if (json == null || json.length() > 4096) return;
+        ui(() -> dispatchOnline(json, 0));
+      }
+    }, "SpotikRadio");
+    web.addJavascriptInterface(new Object() {
+      @JavascriptInterface public void shareText(String text) {
+        if (text == null || text.isEmpty() || text.length() > 16384) return;
+        ui(() -> {
+          if (!Identity.sameOrigin(base, web.getUrl())) return;
+          Intent send = new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text);
+          try { startActivity(Intent.createChooser(send, "Поделиться музыкой")); }
+          catch (android.content.ActivityNotFoundException e) { toast("Нет приложения для отправки. Скопируйте ссылку."); }
+        });
+      }
+    }, "HomeMusicAndroid");
     web.addJavascriptInterface(
         new Object() {
           @JavascriptInterface
