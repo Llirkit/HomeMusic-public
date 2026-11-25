@@ -145,6 +145,7 @@ public final class PlaybackService extends MediaSessionService {
   }
 
   boolean isOnline() { return !onlineId.isEmpty(); }
+  boolean isRadio() { return !radioToken.isEmpty(); }
 
   private void pollRadio() {
     if (radioToken.isEmpty() || radioBusy || !player.getPlayWhenReady()

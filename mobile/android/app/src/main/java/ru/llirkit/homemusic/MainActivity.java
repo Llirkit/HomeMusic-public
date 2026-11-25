@@ -327,7 +327,7 @@ public final class MainActivity extends Activity {
     } catch (JSONException | IllegalArgumentException e) {
       try {
         String id = new JSONObject(json).optString("id");
-        web.evaluateJavascript("window.hmAndroidPlayback && window.hmAndroidPlayback(" +
+        web.evaluateJavascript("(window.hmAndroidRadio || window.hmAndroidPlayback) && (window.hmAndroidRadio || window.hmAndroidPlayback)(" +
             new JSONObject().put("id", id).put("state", -2) + ")", null);
       } catch (JSONException ignored) { }
       toast("Не удалось запустить плеер. Попробуйте ещё раз");
@@ -608,8 +608,9 @@ public final class MainActivity extends Activity {
           owner = "";
           if (lyricsDialog != null) lyricsDialog.dismiss();
           prefs.edit().remove("owner").remove("username").apply();
-          if (PlaybackService.current != null) PlaybackService.current.stopOnline();
-          if (controller != null) {
+          boolean publicRadio = PlaybackService.current != null && PlaybackService.current.isRadio();
+          if (PlaybackService.current != null && !publicRadio) PlaybackService.current.stopOnline();
+          if (controller != null && !publicRadio) {
             controller.pause();
             controller.clearMediaItems();
           }
@@ -858,6 +859,7 @@ public final class MainActivity extends Activity {
                       try {
                         String next = Identity.origin(field.getText().toString());
                         if (!next.equals(base)) {
+                          if (PlaybackService.current != null) PlaybackService.current.stopOnline();
                           clearAccount();
                           base = next;
                           prefs.edit().putString("server", base).apply();
