@@ -994,6 +994,7 @@ export interface MixOut {
 export interface MixSettingsOut {
   mode: MixMode;
   mix_hour: number;
+  mix_minute?: number;
   timezone: string;
   /** local time */
   next_build_at: ISODateTime;
@@ -1013,6 +1014,7 @@ export interface MixTodayOut {
 export interface MixSettingsIn {
   mode?: MixMode;
   mix_hour?: number;
+  mix_minute?: number;
 }
 
 export interface TasteOnboardingOut {

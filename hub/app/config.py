@@ -112,7 +112,8 @@ class MixesCfg(BaseModel):
 
     size: int = 50
     reserve: int = 20  # taken beyond `size`: a song that did not download is replaced by the next one
-    default_hour: int = 5
+    default_hour: int = 7
+    default_minute: int = 30
     seeds: int = 8
     max_per_artist: int = 2
     min_duration_s: int = 90

@@ -154,7 +154,7 @@ export function MixCard() {
       <div className="flex items-center gap-3">
         <Icon name="sparkle" size={24} className="shrink-0 text-accent" />
         <div className="min-w-0 text-[13px] text-muted">
-          <span className="font-semibold text-fg">«Микс дня»</span> появится в {settings.mix_hour}:00
+          <span className="font-semibold text-fg">«Микс дня»</span> появится в {String(settings.mix_hour).padStart(2, '0')}:{String(settings.mix_minute ?? 0).padStart(2, '0')}
         </div>
       </div>
       {buildButton}
@@ -314,7 +314,7 @@ function MixModes({
       </div>
       <Segmented<MixMode> label="Режим микса" value={settings.mode} onChange={onMode} options={MODES} />
       <p className="mt-2 text-[13px] text-muted">
-        {hint}. Новый микс — каждый день в {settings.mix_hour}:00.
+        {hint}. Новый микс — каждый день в {String(settings.mix_hour).padStart(2, '0')}:{String(settings.mix_minute ?? 0).padStart(2, '0')}.
       </p>
       <Button small icon="refresh" className="mt-3" busy={building} disabled={building} onClick={onRebuild}>
         {building ? 'Собирается…' : 'Собрать заново'}

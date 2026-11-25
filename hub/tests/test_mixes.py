@@ -737,7 +737,8 @@ async def test_today_settings_and_rebuild(env, monkeypatch) -> None:
     r = await client.get("/api/mixes/today")
     assert r.status_code == 200, r.text
     assert r.json()["mix"] is None and r.json()["onboarding"] is True
-    assert r.json()["settings"]["mode"] == "normal" and r.json()["settings"]["mix_hour"] == 5
+    assert r.json()["settings"]["mode"] == "normal" and r.json()["settings"]["mix_hour"] == 7
+    assert r.json()["settings"]["mix_minute"] == 30
 
     await history(env["admin"])
     fake_generators(monkeypatch, [new_track(5000 + i) for i in range(10)])
@@ -755,6 +756,11 @@ async def test_today_settings_and_rebuild(env, monkeypatch) -> None:
     assert r.status_code == 200 and (r.json()["mode"], r.json()["mix_hour"]) == ("discover", 7)
     assert (await client.put("/api/mixes/settings", json={"mode": "loud"})).status_code == 422
     assert (await client.put("/api/mixes/settings", json={"mix_hour": 24})).status_code == 422
+    r = await client.put("/api/mixes/settings", json={"mix_hour": 7, "mix_minute": 30})
+    assert r.status_code == 200 and r.json()["mix_minute"] == 30
+    assert ":30:00" in r.json()["next_build_at"]
+    for minute in (-1, 60):
+        assert (await client.put("/api/mixes/settings", json={"mix_minute": minute})).status_code == 422
 
     r = await client.post("/api/mixes/rebuild", json={})
     assert r.status_code == 200 and r.json() == {"queued": True}
@@ -824,14 +830,25 @@ async def test_onboarding_picks_artists_and_starts_a_build(env) -> None:
 # --- the schedule ------------------------------------------------------------------------------------------------------
 
 
-async def test_schedule_builds_once_a_day_after_the_hour(env) -> None:
+def test_next_build_at_uses_minutes_and_rolls_to_tomorrow(env):
+    from app.mixes import core
+
+    before = datetime(2026, 10, 23, 4, 29, 59)
+    exact = datetime(2026, 10, 23, 4, 30)
+    nxt = core.next_build_at(7, before, mix_minute=30)
+    assert (nxt.day, nxt.hour, nxt.minute) == (23, 7, 30)
+    nxt = core.next_build_at(7, exact, mix_minute=30)
+    assert (nxt.day, nxt.hour, nxt.minute) == (24, 7, 30)
+
+
+async def test_schedule_builds_once_a_day_at_0730(env) -> None:
     from app.mixes import core
 
     me = env["admin"]
     quiet = await add_user("quiet")  # no history, no picked artists: no mix
     await history(me, 1)
-    before = datetime(2026, 10, 23, 1, 30)  # 04:30 in Moscow
-    after = datetime(2026, 10, 23, 2, 30)  # 05:30
+    before = datetime(2026, 10, 23, 4, 29, 59)  # 07:29:59 in Moscow
+    after = datetime(2026, 10, 23, 4, 30)  # 07:30
 
     assert await core.due_users(before) == []
     assert await core.due_users(after) == [me]

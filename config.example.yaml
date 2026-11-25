@@ -83,6 +83,8 @@ library:
   backup_hour: 4   # local time; daily copy of Hub and Navidrome DBs to MUSIC_ROOT/.backups
 
 mixes:
+  default_hour: 7
+  default_minute: 30
   taste_model: v2  # v1 is the rollback: new mixes and new wave sessions switch back
   taste_shadow: false
 

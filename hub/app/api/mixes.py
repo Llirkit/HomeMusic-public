@@ -59,7 +59,9 @@ async def mix_out(s: AsyncSession, mix: Mix, user_id: int) -> MixOut:
 async def settings_out(s: AsyncSession, user_id: int) -> MixSettingsOut:
     st = await core.settings_of(s, user_id)
     return MixSettingsOut(mode=st.mode, mix_hour=st.mix_hour, timezone=get_settings().timezone,  # type: ignore[arg-type]
-                          next_build_at=core.next_build_at(st.mix_hour), nd_playlist_id=st.nd_playlist_id,
+                          mix_minute=st.mix_minute,
+                          next_build_at=core.next_build_at(st.mix_hour, mix_minute=st.mix_minute),
+                          nd_playlist_id=st.nd_playlist_id,
                           artists=list(st.artists_json or []))
 
 
@@ -93,6 +95,8 @@ async def put_settings(body: MixSettingsIn, user: User = Depends(current_user),
         st.mode = body.mode
     if body.mix_hour is not None:
         st.mix_hour = body.mix_hour
+    if body.mix_minute is not None:
+        st.mix_minute = body.mix_minute
     await s.flush()
     return await settings_out(s, user.id)
 

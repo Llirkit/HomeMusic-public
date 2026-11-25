@@ -922,6 +922,7 @@ class MixOut(BaseModel):
 class MixSettingsOut(BaseModel):
     mode: MixMode
     mix_hour: int
+    mix_minute: int
     timezone: str
     next_build_at: datetime  # local time
     nd_playlist_id: str | None = None
@@ -938,6 +939,7 @@ class MixTodayOut(BaseModel):
 class MixSettingsIn(BaseModel):
     mode: MixMode | None = None
     mix_hour: int | None = Field(default=None, ge=0, le=23)
+    mix_minute: int | None = Field(default=None, ge=0, le=59)
 
 
 class MixRebuildIn(BaseModel):

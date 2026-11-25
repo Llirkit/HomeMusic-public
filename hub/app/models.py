@@ -458,7 +458,8 @@ class MixSettings(Base):
 
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     mode: Mapped[str] = mapped_column(String(16), default="normal")  # normal/favorites/discover
-    mix_hour: Mapped[int] = mapped_column(Integer, default=5)  # local time (`Settings.timezone`)
+    mix_hour: Mapped[int] = mapped_column(Integer, default=7)  # local time (`Settings.timezone`)
+    mix_minute: Mapped[int] = mapped_column(Integer, default=30)
     nd_playlist_id: Mapped[str | None] = mapped_column(String(64))  # «Микс дня» in Navidrome: one id for good
     # onboarding: [{ref, name}] the user picked on «Что вы слушаете?» (a new user without history)
     artists_json: Mapped[list[Any]] = mapped_column(JSON, default=list)

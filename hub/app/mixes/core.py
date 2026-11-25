@@ -49,7 +49,7 @@ log = logging.getLogger(__name__)
 PRIORITY_MIX = PRIORITY_IMPORT
 PLAYLIST_NAME = "Микс дня"
 SYNC_DELAY_S = 1  # coalesce a burst without holding ready songs behind downloads
-CHECK_EVERY_S = 300
+CHECK_EVERY_S = 60
 LISTENED_S = 30
 FAILED = ("failed", "needs_review", "cancelled")
 
@@ -61,7 +61,7 @@ async def settings_of(s: AsyncSession, user_id: int) -> MixSettings:
     row = await s.get(MixSettings, user_id)
     if row is None:
         row = MixSettings(user_id=user_id, mode="normal", mix_hour=get_settings().cfg.mixes.default_hour,
-                          artists_json=[])
+                          mix_minute=get_settings().cfg.mixes.default_minute, artists_json=[])
         s.add(row)
         await s.flush()
     return row
@@ -496,7 +496,7 @@ async def due_users(now: datetime | None = None) -> list[int]:
     async with session_scope() as s:
         for u in (await s.execute(select(User).order_by(User.id))).scalars():
             st = await settings_of(s, u.id)
-            if st.last_build_on == today or local.hour < st.mix_hour:
+            if st.last_build_on == today or (local.hour, local.minute) < (st.mix_hour, st.mix_minute):
                 continue
             if not (st.artists_json or await has_history(s, u.id)):
                 continue
@@ -520,10 +520,10 @@ async def schedule_loop() -> None:
         await asyncio.sleep(CHECK_EVERY_S)
 
 
-def next_build_at(mix_hour: int, now: datetime | None = None) -> datetime:
+def next_build_at(mix_hour: int, now: datetime | None = None, *, mix_minute: int = 0) -> datetime:
     """Local time of the next scheduled build."""
     local = builder.local_now(now)
-    nxt = local.replace(hour=mix_hour, minute=0, second=0, microsecond=0)
+    nxt = local.replace(hour=mix_hour, minute=mix_minute, second=0, microsecond=0)
     return nxt if nxt > local else nxt + timedelta(days=1)
 
 

@@ -322,8 +322,8 @@ must publish the exact schema together with server support. This extension does 
 |---|---|---|
 | GET | `/api/mixes/today` | `MixTodayOut` `{mix: MixOut \| null, building, settings: MixSettingsOut, onboarding}`. `mix` — the user's current mix (lives until the next one); `null` — none yet. `building` — a build is queued or running. `onboarding` — no history, no picked artists and no mix: show «Что вы слушаете?» |
 | GET | `/api/mixes/{id}` | `MixOut`; another user's (not admin) or unknown → `404` |
-| GET | `/api/mixes/settings` | `MixSettingsOut` `{mode, mix_hour, timezone, next_build_at, nd_playlist_id, artists}` |
-| PUT | `/api/mixes/settings` | `MixSettingsIn` `{mode?: normal\|favorites\|discover, mix_hour?: 0…23}` → `MixSettingsOut` (else `422`). A new mode makes the next mix, a new hour — from the next day |
+| GET | `/api/mixes/settings` | `MixSettingsOut` `{mode, mix_hour, mix_minute, timezone, next_build_at, nd_playlist_id, artists}` |
+| PUT | `/api/mixes/settings` | `MixSettingsIn` `{mode?: normal\|favorites\|discover, mix_hour?: 0…23, mix_minute?: 0…59}` → `MixSettingsOut` (else `422`). A new mode makes the next mix, a new hour — from the next day |
 | POST | `/api/mixes/rebuild` | `{user_id?}` → `{queued}` — build the mix again now (admin only, else `403`; `user_id` — another user's). `queued: false` — a build is under way already. The new mix replaces the current one when ready |
 | GET | `/api/taste/onboarding?q=` | `TasteOnboardingOut` `{needed, selected: [{ref, name}], suggestions: CatalogArtist[]}` — artists to pick: the library's most present ones and Deezer's chart, or found by `q` |
 | POST | `/api/taste/artists` | `{artist_refs: ["dz:…"]}` (1…20) → `MixSettingsOut`; not a Deezer artist → `400`, unknown → `404`. The user's first pick queues the first build at once |

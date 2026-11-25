@@ -820,7 +820,7 @@ const TASTE_ARTISTS = [
     nb_fans: 90000 + i * 13000,
   })),
 ];
-const mixSettings = { mode: 'normal', mix_hour: 5, artists: [] as Array<{ ref: string; name: string }> };
+const mixSettings = { mode: 'normal', mix_hour: 7, mix_minute: 30, artists: [] as Array<{ ref: string; name: string }> };
 let mixBuildAt = 0; // a build is under way until then
 let mixSeq = 0;
 type MockMix = { id: number; created_at: string; started: number; mode: string; tracks: Json[] };
@@ -867,7 +867,7 @@ function makeMix() {
 
 function mixSettingsOut() {
   const next = new Date();
-  next.setHours(mixSettings.mix_hour, 0, 0, 0);
+  next.setHours(mixSettings.mix_hour, mixSettings.mix_minute, 0, 0);
   if (next <= new Date()) next.setDate(next.getDate() + 1);
   return { ...mixSettings, timezone: 'Europe/Moscow', next_build_at: next.toISOString(), nd_playlist_id: curMix ? 'pl-mix' : null };
 }
@@ -1145,6 +1145,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<boolea
     if (b.mode !== undefined && !(String(b.mode) in MIX_MODES)) return send(res, 422, { detail: 'Неверный режим' }), true;
     if (b.mode !== undefined) mixSettings.mode = String(b.mode);
     if (b.mix_hour !== undefined) mixSettings.mix_hour = Number(b.mix_hour);
+    if (b.mix_minute !== undefined) mixSettings.mix_minute = Number(b.mix_minute);
     return send(res, 200, mixSettingsOut()), true;
   }
   if (p === '/api/mixes/rebuild' && m === 'POST') {
