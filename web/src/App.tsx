@@ -8,8 +8,8 @@ import { TabBar, type Tab } from './components/TabBar';
 import { ErrorState, Loading, cx } from './components/ui';
 import { STANDALONE } from './lib/embedded';
 import { hubEvents } from './lib/events';
-import { restoreListening, stopListening } from './lib/listen';
-import { restoreWave } from './lib/wave';
+import { stopListening } from './lib/listen';
+import { connectAccount } from './lib/connect';
 import { resetStars } from './lib/stars';
 import { startNotificationWatcher, stopNotificationWatcher } from './lib/notify';
 import { SessionContext } from './lib/session';
@@ -140,11 +140,8 @@ export function App() {
   useEffect(() => {
     const account = me?.id ?? null;
     setListeningAccount(account);
-    if (!route.path.startsWith('/radio/')) {
-      restoreListening(account);
-      restoreWave(account);
-    }
-  }, [me]);
+    connectAccount(route.path.startsWith('/radio/') ? null : account);
+  }, [me, route.path.startsWith('/radio/')]);
 
   useEffect(() => {
     const onUnauthorized = () => {

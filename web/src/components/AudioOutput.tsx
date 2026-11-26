@@ -3,10 +3,13 @@ import { createPortal } from 'react-dom';
 import { hasNativeAudioOutput, hasOutputPicker, refreshAudioOutputs, requestAudioDeviceAccess, requestAudioOutput, selectAudioOutput,
   showNativeAudioOutput, supportsAudioOutput, useAudioOutput } from '../lib/audioOutput';
 import { Button, IconButton, Sheet } from './ui';
+import { PlaybackDevices } from './PlaybackDevices';
+import { useConnect } from '../lib/connect';
 
 export function AudioOutputButton({ compact = false, small = false }: { compact?: boolean; small?: boolean }) {
   const [open, setOpen] = useState(false);
-  const onClick = () => hasNativeAudioOutput() ? showNativeAudioOutput() : setOpen(true);
+  const { available } = useConnect();
+  const onClick = () => hasNativeAudioOutput() && !available ? showNativeAudioOutput() : setOpen(true);
   return <>
     {compact ? <IconButton icon="speaker" label="Аудиовыход" onClick={onClick} /> :
       <Button icon="speaker" small={small} variant={small ? 'ghost' : 'secondary'} block={!small} onClick={onClick}>Аудиовыход</Button>}
@@ -19,6 +22,8 @@ function AudioOutputSheet({ onClose }: { onClose: () => void }) {
   const supported = supportsAudioOutput();
   useEffect(() => { void refreshAudioOutputs(); }, []);
   return <Sheet open onClose={onClose} title="Аудиовыход">
+    <PlaybackDevices />
+    {hasNativeAudioOutput() && <div className="my-3"><Button block onClick={showNativeAudioOutput}>Наушники и колонки телефона</Button></div>}
     {supported ? <div className="space-y-3" aria-busy={busy}>
       <p className="text-sm text-muted">Куда воспроизводить музыку на этом устройстве.</p>
       <label className="label" htmlFor="hm-audio-output">Устройство</label>
@@ -39,6 +44,6 @@ function AudioOutputSheet({ onClose }: { onClose: () => void }) {
         <p className="text-sm text-muted">Для показа всех выходов этот браузер требует разрешение микрофона. Аудиопоток сразу закрывается, запись не ведётся.</p>
         <Button disabled={busy} onClick={() => void requestAudioDeviceAccess()}>Разрешить и показать устройства</Button>
       </div>}
-    </div> : <p className="text-sm text-muted">Этот браузер не поддерживает выбор аудиовыхода. Выберите наушники или колонки в настройках звука устройства. В браузере на компьютере откройте HomeMusic по HTTPS.</p>}
+    </div> : !hasNativeAudioOutput() && <p className="text-sm text-muted">Этот браузер не поддерживает выбор аудиовыхода. Выберите наушники или колонки в настройках звука устройства. В браузере на компьютере откройте HomeMusic по HTTPS.</p>}
   </Sheet>;
 }

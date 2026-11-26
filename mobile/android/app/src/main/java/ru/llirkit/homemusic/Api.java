@@ -76,6 +76,30 @@ final class Api {
     return new JSONObject(text(base, "/api/auth/me"));
   }
 
+  static JSONObject post(String base, String path, JSONObject body) throws IOException, org.json.JSONException {
+    if (!Identity.sameOrigin(base, base + path)) throw new IOException("Другой адрес сервера");
+    HttpURLConnection c = (HttpURLConnection) new URL(base + path).openConnection();
+    c.setConnectTimeout(5000); c.setReadTimeout(5000); c.setInstanceFollowRedirects(false);
+    c.setRequestMethod("POST"); c.setDoOutput(true);
+    c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+    String cookie = CookieManager.getInstance().getCookie(base);
+    if (cookie != null) c.setRequestProperty("Cookie", cookie);
+    try {
+      try (OutputStream out = c.getOutputStream()) { out.write(body.toString().getBytes(StandardCharsets.UTF_8)); }
+      int status = c.getResponseCode();
+      if (status == 401 || status == 403) throw new LoginRequired();
+      if (status != 200) throw new IOException("Сервер ответил HTTP " + status);
+      try (InputStream in = c.getInputStream(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+        byte[] buffer = new byte[8192]; int n;
+        while ((n = in.read(buffer)) != -1) {
+          out.write(buffer, 0, n);
+          if (out.size() > 8 * 1024 * 1024) throw new IOException("Слишком большой ответ");
+        }
+        return new JSONObject(out.toString(StandardCharsets.UTF_8.name()));
+      }
+    } finally { c.disconnect(); }
+  }
+
   static String encode(String value) {
     try {
       return URLEncoder.encode(value, "UTF-8");

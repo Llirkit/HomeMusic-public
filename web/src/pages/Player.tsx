@@ -4,6 +4,7 @@ import { PlayingRadioActions } from '../components/PublicationActions';
 import { LikeButton } from '../components/LikeButton';
 import { LyricsButton } from '../components/Lyrics';
 import { AudioOutputButton } from '../components/AudioOutput';
+import { PlaybackLocation } from '../components/PlaybackDevices';
 import { TrackMenuButton } from '../components/TrackMenu';
 import { Button, Cover, Empty, IconButton, Spinner, cx } from '../components/ui';
 import { fmtDuration, providerLabel } from '../lib/format';
@@ -81,6 +82,7 @@ export function PlayerPage() {
 
   return (
     <div className="pt-safe mx-auto flex min-h-dvh max-w-2xl flex-col">
+      <PlaybackLocation />
       <div className="flex min-h-14 items-center gap-1 px-2">
         <IconButton icon="down" label="Свернуть" onClick={() => goBack('/home')} />
         <div className="min-w-0 flex-1 text-center text-xs uppercase tracking-wide text-muted">{contextLabel(context)}</div>
@@ -214,6 +216,7 @@ export function PlayerPage() {
 function contextLabel(context: string): string {
   if (context.startsWith('wave:')) return 'Моя волна';
   if (context.startsWith('mix:')) return 'Микс дня';
+  if (context.startsWith('playlist:')) return 'Плейлист';
   return (
     { album: 'Альбом', artist: 'Исполнитель', playlist: 'Плейлист', liked: 'Понравившиеся', search: 'Поиск', queue: 'Очередь' } as Record<string, string>
   )[context] ?? 'Сейчас играет';

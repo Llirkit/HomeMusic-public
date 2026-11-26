@@ -65,8 +65,8 @@ function persistWave() {
 }
 
 /** Continue the same server session, including events that were still awaiting acknowledgement. */
-export function restoreWave(account: number | null) {
-  if (sessionAccount === account) return;
+export function restoreWave(account: number | null, force = false) {
+  if (sessionAccount === account && !force) return;
   session = null;
   sessionAccount = account;
   const st = getListenState();

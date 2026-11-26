@@ -8,6 +8,7 @@ import { Icon } from './Icon';
 import { LikeButton } from './LikeButton';
 import { LyricsButton } from './Lyrics';
 import { AudioOutputButton } from './AudioOutput';
+import { PlaybackLocation } from './PlaybackDevices';
 import { TrackMenuButton } from './TrackMenu';
 import { Cover, IconButton, Spinner, cx } from './ui';
 
@@ -105,6 +106,7 @@ export function MiniPlayer() {
   return (
     <div ref={box} className="fixed inset-x-0 bottom-[calc(var(--tabbar-h)+env(safe-area-inset-bottom))] z-40 mx-auto max-w-2xl px-2 pb-2 lg:left-60 lg:max-w-none lg:px-4" role="region" aria-label="Прослушивание">
       <div className="anim-up overflow-hidden rounded-xl border border-line bg-raised/95 shadow-2xl backdrop-blur">
+        <PlaybackLocation />
         <div className="flex items-center gap-2 py-1.5 pl-2 pr-1">
           {STANDALONE ? (
             <Link to="/player" className="flex min-w-0 flex-1 items-center gap-3" title="Открыть плеер">

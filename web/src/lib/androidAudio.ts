@@ -55,7 +55,8 @@ export class AndroidAudio extends EventTarget implements AudioTransport {
     this.lastQueue = s.queue;
     this.lastIndex = s.index;
     this.lastRepeat = s.repeat;
-    this.send(load ? 'load' : 'queue', { queue: s.queue, index: s.index, repeat: s.context.startsWith('wave:') && s.repeat === 'all' ? 'off' : s.repeat, position: s.position, volume: s.volume });
+    this.send(load ? 'load' : 'queue', { queue: s.queue, index: s.index, context: s.context, shuffle: s.shuffle, smart: s.smart,
+      repeat: s.context.startsWith('wave:') && s.repeat === 'all' ? 'off' : s.repeat, position: s.position, volume: s.volume });
   }
   get currentTime() { return this.position; }
   set currentTime(value: number) {

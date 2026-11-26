@@ -92,6 +92,19 @@ test('daily mix offers radio next to sharing and creates a station from the mix'
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
+test('radio after a real click on the tenth playlist row keeps the playlist identity and current track', async ({ page }) => {
+  await fakeMedia(page);
+  const state = await backend(page);
+  const tracks = Array.from({ length: 12 }, (_, i) => song(i + 1));
+  await page.route('**/api/playlists/p1', route => route.fulfill({ json: { id: 'p1', name: 'Дорога', song_count: 12, duration_s: 2160, tracks } }));
+  await page.goto('/#/playlist/p1');
+  await page.getByRole('button', { name: 'Слушать «Песня 10»', exact: true }).click();
+  await page.getByRole('button', { name: 'Создать онлайн-радио', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Радио создано' })).toBeVisible();
+  expect(state.requests[0]).toMatchObject({ kind: 'radio', source_kind: 'playlist', source_id: 'p1',
+    playback: { context: 'playlist:p1', index: 9, queue: expect.arrayContaining([expect.objectContaining({ ref: 'nd:s10' })]) } });
+});
+
 test('playlist list offers radio directly, while an empty playlist cannot start a station', async ({ page }) => {
   const state = await backend(page);
   await page.goto('/#/playlists');
@@ -186,7 +199,8 @@ test('full player for a daily mix creates radio from the playing mix', async ({ 
   await expect(page).toHaveURL(/\/player/);
   await page.getByRole('button', { name: 'Создать онлайн-радио', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Радио создано' })).toBeVisible();
-  expect(state.requests).toEqual([{ kind: 'radio', source_kind: 'mix', source_id: '1' }]);
+  expect(state.requests).toEqual([expect.objectContaining({ kind: 'radio', source_kind: 'mix', source_id: '1',
+    playback: expect.objectContaining({ context: 'mix:1', index: 0, position: 0 }) })]);
 });
 
 test('listener controls personal volume, output and equalizer without broadcast controls', async ({ page }) => {

@@ -131,7 +131,7 @@ function set(patch: Partial<ListenState>) {
   if (audio instanceof AndroidAudio) queueMicrotask(() => { if (audio instanceof AndroidAudio) audio.syncQueue(); });
 }
 
-function subscribe(fn: () => void) {
+export function subscribeListening(fn: () => void) {
   subscribers.add(fn);
   return () => {
     subscribers.delete(fn);
@@ -145,7 +145,7 @@ export const getListenState = (): ListenState => state;
 
 /** A slice of the listening state; `select` must return a primitive or a stored object (not a new one). */
 export function useListen<T>(select: (s: ListenState) => T): T {
-  return useSyncExternalStore(subscribe, () => select(state));
+  return useSyncExternalStore(subscribeListening, () => select(state));
 }
 
 let audio: AudioTransport | null = null;
@@ -563,9 +563,9 @@ const SESSION_KEY = 'hm-listen-session:';
 let sessionAccount: number | null = null;
 let lastSaved = 0;
 
-interface SavedSession {
+export interface SavedSession {
   version: 1;
-  queue: ListenTrack[];
+  queue: readonly ListenTrack[];
   index: number;
   context: string;
   /** the list's launch: a reload goes on with the same one */
@@ -577,6 +577,34 @@ interface SavedSession {
   /** Indices retain object identity, including duplicate tracks, after JSON serialization. */
   originalOrder: number[] | null;
   smart?: boolean;
+}
+
+export function playbackCheckpoint(): SavedSession | null {
+  return state.track ? { version: 1, queue: state.queue, index: state.index, context: state.context,
+    launch: listLaunch, position: state.position, autoplay: listenBusy(), shuffle: state.shuffle,
+    smart: state.smart, repeat: state.repeat,
+    originalOrder: unshuffled?.map((t) => state.queue.indexOf(t)).filter(i => i >= 0) ?? null } : null;
+}
+
+/** Adopt an account checkpoint without shuffling it or starting a new listening context. */
+export function adoptPlayback(saved: SavedSession, autoplay = false) {
+  unshuffled = saved.originalOrder?.map(i => saved.queue[i]) ?? null;
+  listContext = saved.context;
+  listLaunch = saved.launch ?? newLaunch(saved.context);
+  set({ shuffle: saved.shuffle, smart: saved.smart === true, repeat: saved.repeat });
+  start(saved.queue, saved.index, false, saved.position, autoplay);
+  smartHooks?.restored();
+}
+
+/** Show another device's queue without opening an audio stream or replacing native offline playback. */
+export function previewPlayback(saved: SavedSession) {
+  listContext = saved.context;
+  listLaunch = saved.launch ?? newLaunch(saved.context);
+  unshuffled = saved.originalOrder?.map(i => saved.queue[i]) ?? null;
+  const track = saved.queue[saved.index];
+  set({ track, queue: saved.queue, index: saved.index, context: saved.context, position: saved.position,
+    duration: track.duration_s ?? 0, phase: 'paused', shuffle: saved.shuffle, smart: saved.smart === true,
+    repeat: saved.repeat, info: null, error: null });
 }
 
 function persistListening(force = false) {
@@ -597,11 +625,11 @@ function persistListening(force = false) {
 }
 
 /** Restore only after /me confirms the account. Native Android playback owns its own session. */
-export function restoreListening(account: number | null) {
+export function restoreListening(account: number | null, restore = true) {
   if (sessionAccount === account) return;
   if (sessionAccount !== null) stopListening();
   sessionAccount = account;
-  if (account === null || canPlayAll()) return;
+  if (account === null || canPlayAll() || !restore) return;
   try {
     const saved = JSON.parse(localStorage.getItem(SESSION_KEY + account) ?? 'null') as SavedSession | null;
     const validTrack = (t: ListenTrack) => t && typeof t.ref === 'string' && !!t.ref && typeof t.title === 'string' && typeof t.artist === 'string';
@@ -710,7 +738,7 @@ export function registerSmart(hooks: SmartHooks) {
 
 /** The smart shuffle chosen (the last choice of the button); `smart` of the state is whether the playing list has it. */
 export function useSmartChosen(): boolean {
-  return useSyncExternalStore(subscribe, () => smartChosen);
+  return useSyncExternalStore(subscribeListening, () => smartChosen);
 }
 
 /** The Hub did not answer or the session is over: the plain shuffle goes on. */
@@ -837,6 +865,7 @@ export function toggle() {
 }
 
 function resume() {
+  if (!window.dispatchEvent(new Event('hm:resume-playback', { cancelable: true }))) return;
   const a = audio;
   const track = state.track;
   if (!a || !track) return;
@@ -949,4 +978,4 @@ function mediaSession(track: ListenTrack) {
   }
 }
 
-connectDesktopPlayer({ getState: getListenState, subscribe, toggle, previous: prev, next });
+connectDesktopPlayer({ getState: getListenState, subscribe: subscribeListening, toggle, previous: prev, next });

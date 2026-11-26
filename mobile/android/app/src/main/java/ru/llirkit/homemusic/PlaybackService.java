@@ -33,9 +33,14 @@ public final class PlaybackService extends MediaSessionService {
   private long radioNextAt;
   private final ExecutorService radioNetwork = Executors.newSingleThreadExecutor();
   private volatile String currentStream = "";
+  private JSONObject connectConfig;
+  private boolean connectInBackground, connectBusy;
+  private int connectGeneration;
+  private long connectNextAt;
+  private final ExecutorService connectNetwork = Executors.newSingleThreadExecutor();
   private final Handler handler = new Handler(Looper.getMainLooper());
   private final Runnable onlineTick = new Runnable() {
-    @Override public void run() { publishOnline(); pollRadio(); handler.postDelayed(this, 1000); }
+    @Override public void run() { publishOnline(); pollRadio(); pollConnect(); handler.postDelayed(this, 1000); }
   };
 
   @Override
@@ -81,6 +86,12 @@ public final class PlaybackService extends MediaSessionService {
 
   void onlineCommand(JSONObject message) throws JSONException {
     String op = message.getString("op"), id = message.optString("id");
+    if (op.equals("connect")) {
+      connectGeneration++;
+      connectConfig = message.optBoolean("enabled") ? new JSONObject(message.toString()) : null;
+      connectNextAt = 0;
+      return;
+    }
     if (op.equals("radio")) {
       String token = message.getString("token");
       if (!token.matches("[A-Za-z0-9_-]{20,48}") || !id.equals("radio:" + token)) return;
@@ -103,6 +114,14 @@ public final class PlaybackService extends MediaSessionService {
       JSONArray tracks = message.getJSONArray("queue");
       int index = message.getInt("index");
       if (id.isEmpty() || tracks.length() == 0 || tracks.length() > 5000 || index < 0 || index >= tracks.length()) return;
+      if (connectConfig != null) {
+        JSONObject checkpoint = connectConfig.optJSONObject("snapshot");
+        if (checkpoint != null) {
+          checkpoint.put("queue", tracks).put("index", index).put("context", message.optString("context", checkpoint.optString("context")));
+          checkpoint.put("shuffle", message.optBoolean("shuffle")).put("smart", message.optBoolean("smart"));
+          checkpoint.put("repeat", message.optString("repeat", "off"));
+        }
+      }
       String base = getSharedPreferences("app", MODE_PRIVATE).getString("server", BuildConfig.SERVER_URL);
       List<MediaItem> items = new ArrayList<>();
       for (int i = 0; i < tracks.length(); i++) {
@@ -166,6 +185,67 @@ public final class PlaybackService extends MediaSessionService {
       catch (JSONException ignored) { }
     }
     session.setSessionActivity(PendingIntent.getActivity(this, 1, new Intent(this, MainActivity.class).putExtra("offline", true), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
+  }
+
+  void connectBackground(boolean background) {
+    connectInBackground = background;
+    connectGeneration++;
+    connectNextAt = 0;
+  }
+
+  void disconnectAccount() { connectConfig = null; connectGeneration++; }
+
+  /** Native polling owns the lease while WebView timers are suspended. Offline music is never uploaded. */
+  private void pollConnect() {
+    if (!connectInBackground || connectConfig == null || connectBusy || isRadio()
+        || android.os.SystemClock.elapsedRealtime() < connectNextAt) return;
+    final int generation = connectGeneration;
+    final String base = getSharedPreferences("app", MODE_PRIVATE).getString("server", BuildConfig.SERVER_URL);
+    final JSONObject body;
+    try {
+      body = new JSONObject().put("account_id", connectConfig.getInt("account_id"))
+          .put("device_id", connectConfig.getString("device_id")).put("name", connectConfig.getString("name"))
+          .put("revision", connectConfig.getInt("revision"));
+      JSONObject checkpoint = connectConfig.optJSONObject("snapshot");
+      if (connectConfig.optBoolean("owner") && checkpoint != null) {
+        checkpoint = new JSONObject(checkpoint.toString());
+        if (!onlineId.isEmpty()) checkpoint.put("index", player.getCurrentMediaItemIndex()).put("position", player.getCurrentPosition() / 1000d);
+        checkpoint.put("autoplay", !onlineId.isEmpty() && player.getPlayWhenReady() && player.getPlaybackState() != Player.STATE_ENDED && player.getPlayerError() == null);
+        body.put("snapshot", checkpoint);
+      }
+    } catch (JSONException e) { return; }
+    connectBusy = true;
+    connectNetwork.execute(() -> {
+      JSONObject result = null;
+      boolean loginRequired = false;
+      try { result = Api.post(base, "/api/playback/heartbeat", body); }
+      catch (Api.LoginRequired e) { loginRequired = true; }
+      catch (Exception ignored) { /* transient failures retry without replacing the offline queue */ }
+      final JSONObject response = result;
+      final boolean expired = loginRequired;
+      handler.post(() -> {
+        connectBusy = false;
+        connectNextAt = android.os.SystemClock.elapsedRealtime() + 2000;
+        if (generation != connectGeneration || connectConfig == null || !connectInBackground) return;
+        if (expired) { connectConfig = null; if (!onlineId.isEmpty()) stopOnline(); return; }
+        if (response == null) return;
+        try {
+          boolean owner = connectConfig.getString("device_id").equals(response.optString("device_id"));
+          boolean changed = connectConfig.getInt("revision") != response.getInt("revision");
+          boolean wasOwner = connectConfig.optBoolean("owner");
+          connectConfig.put("revision", response.getInt("revision")).put("owner", owner);
+          JSONObject checkpoint = response.optJSONObject("snapshot");
+          if (!owner && wasOwner && !onlineId.isEmpty()) player.pause();
+          if (owner && changed && checkpoint != null) {
+            connectConfig.put("snapshot", new JSONObject(checkpoint.toString()));
+            JSONObject load = new JSONObject(checkpoint.toString()).put("op", "load")
+                .put("id", java.util.UUID.randomUUID().toString()).put("volume", player.getVolume());
+            onlineCommand(load);
+            player.setPlayWhenReady(checkpoint.optBoolean("autoplay"));
+          }
+        } catch (JSONException ignored) { }
+      });
+    });
   }
 
   boolean isOnline() { return !onlineId.isEmpty(); }
@@ -240,6 +320,8 @@ public final class PlaybackService extends MediaSessionService {
 
   @Override
   public void onDestroy() {
+    connectGeneration++;
+    connectNetwork.shutdownNow();
     radioGeneration++;
     radioNetwork.shutdownNow();
     radioEqualizer.release();

@@ -526,6 +526,26 @@ class MoodMix(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class PlaybackState(Base):
+    """Account playback checkpoint and exclusive device lease; revision fences old players."""
+
+    __tablename__ = "playback_states"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    device_id: Mapped[str | None] = mapped_column(String(64))
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class PlaybackDevice(Base):
+    __tablename__ = "playback_devices"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("sessions.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(120))
+    seen_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Publication(Base):
     """Revocable links. Radio owns an independent wave and a persisted broadcast clock."""
 

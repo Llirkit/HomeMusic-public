@@ -74,6 +74,61 @@ async def test_radio_common_clock_repeat_scope_and_revoke(env, playlist, monkeyp
         assert (await a.get(f"/api/publications/{p['id']}/audio/1?v=nd:song2")).status_code == 404
 
 
+async def test_radio_starts_at_current_playlist_track_and_position(env, playlist):
+    c = env["client"]
+    body = {"kind": "radio", "source_kind": "playlist", "source_id": "p1", "playback": {
+        "queue": [{"ref": "nd:song1", "title": "Первая", "artist": "Кино"},
+                  {"ref": "nd:song2", "title": "Вторая", "artist": "Кино"}],
+        "index": 1, "context": "playlist:p1", "position": 47, "autoplay": True}}
+    response = await c.post("/api/publications", json=body)
+    assert response.status_code == 200, response.text
+    p = response.json()
+    broadcast = (await c.get(f"/api/publications/{p['id']}/radio")).json()
+    assert broadcast["track"]["ref"] == "nd:song2"
+    assert 47 <= broadcast["position_s"] < 49
+    # Reusing the active station must not reset its clock.
+    body["playback"]["position"] = 3
+    assert (await c.post("/api/publications", json=body)).json()["id"] == p["id"]
+    assert (await c.get(f"/api/publications/{p['id']}/radio")).json()["position_s"] >= 47
+    body["playback"]["context"] = "playlist:other"
+    assert (await c.post("/api/publications", json=body)).status_code == 400
+
+
+async def test_wave_radio_keeps_current_tail_and_independent_continuation(env, playlist, monkeypatch):
+    from app.db import session_scope
+    from app.library.navidrome import NavidromeClient
+    from app.mixes import wave
+    from app.mixes.build import Cand
+    from app.models import WaveSession
+    from app.services import svc
+
+    async with session_scope() as s:
+        s.add(WaveSession(id="playing-wave", user_id=env["admin"], mode="normal", state_json={"seen": ["nd:song1"]}))
+
+    async def start(user, seed, mode, **kwargs):
+        return wave.Batch("radio-fork", "Моя волна", mode, seed, [Cand(svc.deezer.track)], False)
+
+    async def get_song(self, sid):
+        return next(t for t in playlist if t["id"] == sid)
+
+    monkeypatch.setattr(wave, "start", start)
+    monkeypatch.setattr(NavidromeClient, "get_song", get_song)
+    response = await env["client"].post("/api/publications", json={"kind": "radio", "source_kind": "wave", "source_id": "playing-wave",
+        "playback": {"queue": [{"ref": "nd:song1", "title": "Первая", "artist": "Кино"},
+                                {"ref": "nd:song2", "title": "Вторая", "artist": "Кино"}],
+                     "index": 1, "context": "wave:playing-wave", "position": 64, "autoplay": True}})
+    assert response.status_code == 200, response.text
+    pid = response.json()["id"]
+    broadcast = (await env["client"].get(f"/api/publications/{pid}/radio")).json()
+    assert broadcast["track"]["ref"] == "nd:song2"
+    assert 64 <= broadcast["position_s"] < 66
+    async with session_scope() as s:
+        station = await s.get(Publication, pid)
+        assert station.wave_id == "radio-fork"
+        assert [t["ref"] for t in station.tracks_json] == ["nd:song2"]
+        assert (await s.get(WaveSession, "playing-wave")).state_json == {"seen": ["nd:song1"]}
+
+
 async def test_empty_invalid_missing_and_station_limit(env, playlist):
     c = env["client"]
     assert (await c.post("/api/publications", json={"source_kind": "playlist", "source_id": "empty"})).status_code == 409

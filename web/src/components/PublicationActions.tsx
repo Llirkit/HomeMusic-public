@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { request } from '../api/client';
+import { playbackCheckpoint } from '../lib/listen';
 import { canShare, copyText, shareText } from '../lib/share';
 import { attempt, toast } from '../lib/ui';
 import { Link } from '../lib/router';
@@ -17,9 +18,9 @@ export interface Publication {
 
 /** Use the queue's original mix/session, including a former daily mix still playing. */
 export function PlayingRadioActions({ context, inline = false }: { context: string; inline?: boolean }) {
-  const match = /^(mix|wave):(.+)$/.exec(context);
+  const match = /^(mix|wave|playlist):(.+)$/.exec(context);
   if (!match) return null;
-  return <PublicationActions sourceKind={match[1] === 'mix' ? 'mix' : 'wave'} sourceId={match[2]} radio share={false} inline={inline} />;
+  return <PublicationActions sourceKind={match[1] as 'mix' | 'wave' | 'playlist'} sourceId={match[2]} radio share={false} inline={inline} />;
 }
 
 export function PublicationLink({ publication: p }: { publication: Publication }) {
@@ -46,8 +47,10 @@ export function PublicationActions({ sourceKind, sourceId, disabled, radio = sou
     pending.current = true;
     setBusy(kind);
     try {
+      const playback = kind === 'radio' ? playbackCheckpoint() : null;
       const result = await attempt(() => request<Publication>('POST', '/api/publications', {
-        json: { kind, source_kind: sourceKind, source_id: sourceId },
+        json: { kind, source_kind: sourceKind, source_id: sourceId,
+          ...(playback?.context === `${sourceKind}:${sourceId}` ? { playback } : {}) },
       }));
       if (result) setP(result);
     } finally { pending.current = false; setBusy(undefined); }

@@ -145,6 +145,7 @@ public final class MainActivity extends Activity {
           try {
             if (isDestroyed()) return;
             controller = controllerFuture.get();
+            if (PlaybackService.current != null) PlaybackService.current.connectBackground(!activityResumed);
             if (PlaybackService.current != null) PlaybackService.current.onlineListener =
                 json -> { if (web != null && Identity.sameOrigin(base, web.getUrl()))
                   web.evaluateJavascript("window.hmAndroidPlayback && window.hmAndroidPlayback(" + json + "); window.hmAndroidRadio && window.hmAndroidRadio(" + json + ")", null); };
@@ -206,6 +207,12 @@ public final class MainActivity extends Activity {
             ui(() -> dispatchOnline(json, 0));
           }
         }, "SpotikPlayback");
+    web.addJavascriptInterface(new Object() {
+      @JavascriptInterface public void command(String json) {
+        if (json == null || json.length() > 2 * 1024 * 1024) return;
+        ui(() -> dispatchOnline(json, 0));
+      }
+    }, "SpotikConnect");
     web.addJavascriptInterface(new Object() {
       @JavascriptInterface public void command(String json) {
         if (json == null || json.length() > 4096) return;
@@ -610,6 +617,7 @@ public final class MainActivity extends Activity {
           if (lyricsDialog != null) lyricsDialog.dismiss();
           prefs.edit().remove("owner").remove("username").apply();
           boolean publicRadio = PlaybackService.current != null && PlaybackService.current.isRadio();
+          if (PlaybackService.current != null) PlaybackService.current.disconnectAccount();
           if (PlaybackService.current != null && !publicRadio) PlaybackService.current.stopOnline();
           if (controller != null && !publicRadio) {
             controller.pause();
@@ -966,15 +974,21 @@ public final class MainActivity extends Activity {
     }
   }
 
+  private boolean activityResumed;
+
   @Override
   protected void onResume() {
     super.onResume();
+    activityResumed = true;
+    if (PlaybackService.current != null) PlaybackService.current.connectBackground(false);
     handler.post(tick);
     if (updater != null) updater.resume();
   }
 
   @Override
   protected void onPause() {
+    activityResumed = false;
+    if (PlaybackService.current != null) PlaybackService.current.connectBackground(true);
     if (updater != null) updater.pause();
     handler.removeCallbacks(tick);
     super.onPause();

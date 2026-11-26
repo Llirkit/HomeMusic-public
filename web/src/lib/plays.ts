@@ -79,6 +79,10 @@ export function routeContext(): string {
   const path = window.location.hash.replace(/^#/, '').split('?')[0];
   const mix = /^\/mix\/(\d+)/.exec(path);
   if (mix) return `mix:${mix[1]}`;
+  const playlist = /^\/playlist\/([^/]+)$/.exec(path);
+  if (playlist) {
+    try { return `playlist:${decodeURIComponent(playlist[1])}`; } catch { return 'playlist'; }
+  }
   if (path.startsWith('/album/') || path.startsWith('/library/') || path.startsWith('/lib/album/')) return 'album';
   if (path.startsWith('/artist/') || path.startsWith('/lib/artist/')) return 'artist';
   if (path.startsWith('/search')) return 'search';
@@ -100,6 +104,7 @@ const SCREEN_ORIGINS = new Set(['album', 'artist', 'playlist', 'liked', 'search'
 /** Where a list of `context` was launched, when the caller doesn't say: a tap on a mix's track (its «Слушать всё»
  * says `mix_page` itself), a wave's queue, the screen of the list. */
 export function launchOrigin(context: string): LaunchOrigin | null {
+  if (context.startsWith('playlist:')) return 'playlist';
   if (context.startsWith('mix:')) return 'mix_page_track';
   if (context.startsWith('wave:')) return 'wave';
   return SCREEN_ORIGINS.has(context) ? context : null;

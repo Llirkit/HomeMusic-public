@@ -79,7 +79,7 @@ export function NdArtistBubble({ artist, radio = false }: { artist: NdArtistOut;
 
 /** «Слушать» and «Перемешать» for a whole list. */
 export function ListActions({ tracks, context, children }: { tracks: readonly NdSongOut[]; context?: string; children?: ReactNode }) {
-  const smart = useSmartForPage() && (context === 'playlist' || context === 'liked'); // «Перемешать» is the smart shuffle
+  const smart = useSmartForPage() && (context === 'playlist' || context?.startsWith('playlist:') || context === 'liked'); // «Перемешать» is the smart shuffle
   if (!tracks.length && !children) return null;
   return (
     <div className="flex gap-2 px-4 pb-3 pt-1">
@@ -217,7 +217,7 @@ export function PlaylistPage({ id }: { id: string }) {
         title={p.name}
         sub={[tracksWord(p.song_count), p.duration_s ? fmtLength(p.duration_s) : null].filter(Boolean).join(' · ')}
       />
-      <ListActions tracks={p.tracks} context="playlist" />
+      <ListActions tracks={p.tracks} context={`playlist:${id}`} />
       <div className="px-4 pb-3"><PublicationActions sourceKind="playlist" sourceId={id} radio disabled={!p.tracks.length} /></div>
       {p.tracks.length ? (
         <SongList tracks={p.tracks} extra={(t, i) => [{ icon: 'x', label: 'Убрать из плейлиста', onClick: () => void remove(i, t) }]} />

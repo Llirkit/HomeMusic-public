@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.medialib import nd_call, songs_out
 from app.api.mixes import mix_out
+from app.api.playback import Checkpoint
 from app.api.schemas import TrackOut
 from app.api.wave import wave_out
 from app.auth import current_user
@@ -50,6 +51,7 @@ class CreateIn(BaseModel):
     kind: Literal["share", "radio"] = "share"
     source_kind: Literal["track", "playlist", "mix", "wave"]
     source_id: str = Field(min_length=1, max_length=256)
+    playback: Checkpoint | None = None
 
 
 class ControlIn(BaseModel):
@@ -123,6 +125,9 @@ async def source(body: CreateIn, user: User, s: AsyncSession):
 async def create(body: CreateIn, request: Request, user: User = Depends(current_user),
                  s: AsyncSession = Depends(get_session, scope="function")):
     async with _lock:
+        checkpoint = body.playback if body.kind == "radio" else None
+        if checkpoint and checkpoint.context != f"{body.source_kind}:{body.source_id}":
+            raise HTTPException(400, "Играет другой источник. Обновите страницу и попробуйте снова.")
         if body.kind == "radio" and body.source_kind not in ("wave", "playlist", "mix"):
             raise HTTPException(400, "Создайте радио из волны, плейлиста или микса")
         previous = (await s.scalars(select(Publication).where(
@@ -148,8 +153,26 @@ async def create(body: CreateIn, request: Request, user: User = Depends(current_
                 raise HTTPException(e.status, str(e)) from e
             out = await wave_out(s, batch, user.id)
             title, tracks, wave_id = out.title, [t.model_dump(mode="json") for t in out.tracks], batch.session_id
+            if checkpoint:
+                # Keep the audible queue, but replenish from the radio's independent wave session.
+                tracks = []
+                for track in checkpoint.queue[checkpoint.index:]:
+                    _, resolved = await source(CreateIn(source_kind="track", source_id=track.ref), user, s)
+                    tracks.extend(resolved)
         else:
             title, tracks = await source(body, user, s)
+            if checkpoint:
+                # Preserve shuffle, repeated tracks and manually queued songs, including smart recommendations.
+                by_ref = {track["ref"]: track for track in tracks}
+                by_song = {track["nd_song_id"]: track for track in tracks if track.get("nd_song_id")}
+                playing_queue = []
+                for track in checkpoint.queue:
+                    resolved = by_ref.get(track.ref) or by_song.get(track.nd_song_id)
+                    if resolved is None:
+                        _, extra = await source(CreateIn(source_kind="track", source_id=track.ref), user, s)
+                        resolved = extra[0]
+                    playing_queue.append(resolved)
+                tracks = playing_queue
         if not tracks:
             raise HTTPException(409, "Здесь пока нет треков")
         tracks = [TrackOut.model_validate(t).model_dump(mode="json") for t in tracks]
@@ -162,6 +185,16 @@ async def create(body: CreateIn, request: Request, user: User = Depends(current_
         row = Publication(id=secrets.token_urlsafe(24), user_id=user.id, kind=body.kind,
                           source_kind=body.source_kind, source_id=body.source_id, title=title,
                           tracks_json=tracks, wave_id=wave_id)
+        if checkpoint:
+            current = checkpoint.queue[checkpoint.index]
+            matches = [i for i, track in enumerate(tracks) if track["ref"] == current.ref or
+                       (current.nd_song_id and track.get("nd_song_id") == current.nd_song_id)]
+            if not matches:
+                raise HTTPException(409, "Текущего трека больше нет в источнике. Обновите подборку.")
+            index = checkpoint.index if checkpoint.index in matches else matches[0]
+            position = min(checkpoint.position, max(0, (tracks[index].get("duration_s") or 0) - 0.01))
+            offset = sum(t["duration_s"] for t in tracks[:index]) + position
+            row.started_at = utcnow() - timedelta(seconds=offset)
         s.add(row)
         await s.flush()
         await s.commit()

@@ -97,7 +97,7 @@ function createPlayer(url) {
   mainWindow = new BrowserWindow({ width: 1280, height: 860, minWidth: 480, minHeight: 540, show: false,
     title: 'HomeMusic', backgroundColor: '#0b0b0b', icon: appIcon(), autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), additionalArguments: [`--homemusic-origin=${url}`],
-      contextIsolation: true, sandbox: true, nodeIntegration: false } });
+      contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } });
   const win = mainWindow;
   // Audio outputs belong only to the selected Hub. Selecting speakers never grants microphone capture.
   const audioPermission = (contents, permission, requestingOrigin, mainFrame = true) =>
