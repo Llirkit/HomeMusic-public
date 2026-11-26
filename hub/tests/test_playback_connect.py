@@ -31,7 +31,7 @@ async def test_handoff_resume_queue_fences_old_owner_and_survives_reconnect(env)
         assert state["snapshot"]["index"] == 1
         moved = await pc.post("/api/playback/transfer", json={"device_id": "telephone-1", "revision": 1})
         assert moved.status_code == 200, moved.text
-        assert moved.json()["snapshot"]["autoplay"]
+        assert not moved.json()["snapshot"]["autoplay"]  # transfer preserves pause
         assert moved.json()["snapshot"]["shuffle"]
         assert moved.json()["snapshot"]["originalOrder"] == [1, 0]
         stale = (await beat(pc, revision=1, snapshot=snapshot(2))).json()
@@ -77,3 +77,96 @@ async def test_invalid_checkpoint_rejected(env, update):
     body = {**snapshot(), **update}
     response = await beat(env["client"], claim=True, snapshot=body)
     assert response.status_code == 422
+
+
+async def control(client, state, action, **extra):
+    import uuid
+    return await client.post("/api/playback/command", json={"command_id": uuid.uuid4().hex,
+        "revision": state["revision"], "action": action, **extra})
+
+
+async def test_remote_controls_keep_selected_output_and_require_acknowledgement(env):
+    pc = env["client"]
+    state = (await beat(pc, claim=True, snapshot=snapshot())).json()
+    async with app_client(env["app"], login=("admin", "pw")) as phone:
+        await beat(phone, "telephone-1", volume=0.2)
+        state = (await control(phone, state, "play")).json()
+        assert state["device_id"] == "computer-1" and state["snapshot"]["autoplay"]
+        assert state["pending"]
+        # A delayed heartbeat cannot undo a newer command.
+        stale = (await beat(pc, revision=1, snapshot=snapshot(1))).json()
+        assert stale["revision"] == state["revision"] and stale["snapshot"]["autoplay"]
+        acknowledged = (await beat(pc, revision=state["revision"], snapshot=state["snapshot"])).json()
+        assert not acknowledged["pending"]
+        state = (await control(phone, state, "seek", position=64)).json()
+        assert state["snapshot"]["position"] == 64
+        state = (await control(phone, state, "pause")).json()
+        assert not state["snapshot"]["autoplay"]
+        state = (await control(phone, state, "volume", volume=0.35)).json()
+        assert state["snapshot"]["volume"] == 0.35
+        stale = (await beat(pc, revision=1, volume=1, snapshot=snapshot())).json()
+        assert next(d["volume"] for d in stale["devices"] if d["id"] == "computer-1") == 0.35
+        # Choosing another output keeps pause and uses that output's own loudness.
+        state = (await phone.post("/api/playback/transfer", json={"revision": state["revision"], "device_id": "telephone-1"})).json()
+        assert not state["snapshot"]["autoplay"] and state["snapshot"]["volume"] == 0.2
+        state = (await control(pc, state, "play")).json()
+        assert state["device_id"] == "telephone-1" and state["snapshot"]["autoplay"]
+
+
+async def test_choose_device_before_music_and_start_remote_queue(env):
+    pc = env["client"]
+    await beat(pc)
+    await beat(pc, "telephone-1", volume=0.4)
+    state = (await pc.post("/api/playback/transfer", json={"revision": 0, "device_id": "telephone-1"})).json()
+    assert state["snapshot"] is None and state["device_id"] == "telephone-1"
+    response = await control(pc, state, "start", snapshot=snapshot())
+    assert response.status_code == 200, response.text
+    state = response.json()
+    assert state["snapshot"]["index"] == 1 and state["snapshot"]["volume"] == 0.4
+    assert state["snapshot"]["autoplay"] and state["device_id"] == "telephone-1"
+
+
+async def test_queue_commands_retry_idempotency_concurrency_and_bounds(env):
+    pc = env["client"]
+    initial = snapshot()
+    initial["index"] = 0
+    initial["shuffle"] = False
+    initial["originalOrder"] = None
+    state = (await beat(pc, claim=True, snapshot=initial)).json()
+    body = {"action": "next", "revision": state["revision"], "command_id": "retry-next-1"}
+    first = await pc.post("/api/playback/command", json=body)
+    assert first.status_code == 200, first.text
+    state = first.json()
+    assert state["snapshot"]["index"] == 1
+    assert (await pc.post("/api/playback/command", json=body)).json()["revision"] == state["revision"]
+    assert (await control(pc, {"revision": 1}, "pause")).status_code == 409
+    state = (await control(pc, state, "add_next", tracks=[initial["queue"][0]])).json()
+    state = (await control(pc, state, "append", tracks=[initial["queue"][0]])).json()
+    assert len(state["snapshot"]["queue"]) == 4
+    state = (await control(pc, state, "move", index=1, to_index=3)).json()
+    assert state["snapshot"]["index"] == 3
+    state = (await control(pc, state, "remove", index=0)).json()
+    assert state["snapshot"]["index"] == 2
+    assert (await control(pc, state, "remove", index=2)).status_code == 409
+    assert (await control(pc, state, "play_index", index=40)).status_code == 422
+    state = (await control(pc, state, "shuffle", shuffle=True)).json()
+    assert state["snapshot"]["index"] == 0 and state["snapshot"]["shuffle"]
+    state = (await control(pc, state, "shuffle", shuffle=False)).json()
+    assert state["snapshot"]["index"] == 2
+    state = (await control(pc, state, "repeat", repeat="one")).json()
+    assert state["snapshot"]["repeat"] == "one"
+
+
+async def test_commands_cannot_control_another_account_or_a_disconnected_output(env):
+    from app.db import session_scope
+    from app.models import PlaybackDevice, utcnow
+
+    pc = env["client"]
+    state = (await beat(pc, claim=True, snapshot=snapshot())).json()
+    async with app_client(env["app"], login=("alice", "pw")) as other:
+        assert (await control(other, state, "pause")).status_code == 409
+    async with app_client(env["app"], login=None) as guest:
+        assert (await control(guest, state, "pause")).status_code == 401
+    async with session_scope() as s:
+        (await s.get(PlaybackDevice, (env["admin"], "computer-1"))).seen_at = utcnow() - timedelta(minutes=1)
+    assert (await control(pc, state, "pause")).status_code == 409

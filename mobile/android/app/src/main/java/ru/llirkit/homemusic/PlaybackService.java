@@ -181,7 +181,8 @@ public final class PlaybackService extends MediaSessionService {
     player.clearMediaItems();
     player.setRepeatMode(Player.REPEAT_MODE_OFF);
     if (!previous.isEmpty() && onlineListener != null) {
-      try { onlineListener.accept(new JSONObject().put("id", previous).put("state", -1).toString()); }
+      try { onlineListener.accept(new JSONObject().put("id", previous).put("state", -1)
+          .put("connect_revision", connectConfig == null ? 0 : connectConfig.optInt("revision")).toString()); }
       catch (JSONException ignored) { }
     }
     session.setSessionActivity(PendingIntent.getActivity(this, 1, new Intent(this, MainActivity.class).putExtra("offline", true), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
@@ -205,12 +206,16 @@ public final class PlaybackService extends MediaSessionService {
     try {
       body = new JSONObject().put("account_id", connectConfig.getInt("account_id"))
           .put("device_id", connectConfig.getString("device_id")).put("name", connectConfig.getString("name"))
-          .put("revision", connectConfig.getInt("revision"));
+          .put("revision", connectConfig.getInt("revision")).put("volume", player.getVolume());
       JSONObject checkpoint = connectConfig.optJSONObject("snapshot");
       if (connectConfig.optBoolean("owner") && checkpoint != null) {
         checkpoint = new JSONObject(checkpoint.toString());
         if (!onlineId.isEmpty()) checkpoint.put("index", player.getCurrentMediaItemIndex()).put("position", player.getCurrentPosition() / 1000d);
         checkpoint.put("autoplay", !onlineId.isEmpty() && player.getPlayWhenReady() && player.getPlaybackState() != Player.STATE_ENDED && player.getPlayerError() == null);
+        checkpoint.put("volume", player.getVolume()).put("phase", player.getPlayerError() != null ? "error" :
+            !player.getPlayWhenReady() ? "paused" : player.getPlaybackState() == Player.STATE_READY ? "playing" :
+            player.getPlaybackState() == Player.STATE_ENDED ? "ended" : "loading");
+        checkpoint.put("error", player.getPlayerError() != null ? "Не удалось воспроизвести трек" : JSONObject.NULL);
         body.put("snapshot", checkpoint);
       }
     } catch (JSONException e) { return; }
@@ -225,7 +230,7 @@ public final class PlaybackService extends MediaSessionService {
       final boolean expired = loginRequired;
       handler.post(() -> {
         connectBusy = false;
-        connectNextAt = android.os.SystemClock.elapsedRealtime() + 2000;
+        connectNextAt = android.os.SystemClock.elapsedRealtime() + 1000;
         if (generation != connectGeneration || connectConfig == null || !connectInBackground) return;
         if (expired) { connectConfig = null; if (!onlineId.isEmpty()) stopOnline(); return; }
         if (response == null) return;
@@ -235,17 +240,40 @@ public final class PlaybackService extends MediaSessionService {
           boolean wasOwner = connectConfig.optBoolean("owner");
           connectConfig.put("revision", response.getInt("revision")).put("owner", owner);
           JSONObject checkpoint = response.optJSONObject("snapshot");
-          if (!owner && wasOwner && !onlineId.isEmpty()) player.pause();
+          if (!owner && wasOwner && !onlineId.isEmpty()) stopOnline();
           if (owner && changed && checkpoint != null) {
             connectConfig.put("snapshot", new JSONObject(checkpoint.toString()));
-            JSONObject load = new JSONObject(checkpoint.toString()).put("op", "load")
-                .put("id", java.util.UUID.randomUUID().toString()).put("volume", player.getVolume());
-            onlineCommand(load);
+            applyConnectCheckpoint(checkpoint, response.optString("action"));
             player.setPlayWhenReady(checkpoint.optBoolean("autoplay"));
           }
         } catch (JSONException ignored) { }
       });
     });
+  }
+
+  private void applyConnectCheckpoint(JSONObject checkpoint, String action) throws JSONException {
+    JSONArray tracks = checkpoint.getJSONArray("queue");
+    int index = checkpoint.getInt("index");
+    boolean same = !onlineId.isEmpty() && !isRadio() && player.getMediaItemCount() == tracks.length()
+        && player.getCurrentMediaItemIndex() == index;
+    for (int i = 0; same && i < tracks.length(); i++) {
+      same = player.getMediaItemAt(i).mediaId.equals("online:" + i + ":" + tracks.getJSONObject(i).getString("ref"));
+    }
+    if (!same || action.equals("start")) {
+      JSONObject load = new JSONObject(checkpoint.toString()).put("op", "load")
+          .put("id", java.util.UUID.randomUUID().toString());
+      onlineCommand(load);
+    } else {
+      if (action.equals("seek") || action.equals("previous") || action.equals("play_index") || action.equals("next")
+          || Math.abs(player.getCurrentPosition() / 1000d - checkpoint.optDouble("position")) > 1) {
+        player.seekTo(Math.max(0, (long) (checkpoint.optDouble("position") * 1000)));
+      }
+      String repeat = checkpoint.optString("repeat");
+      player.setRepeatMode(repeat.equals("one") ? Player.REPEAT_MODE_ONE : repeat.equals("all") ? Player.REPEAT_MODE_ALL : Player.REPEAT_MODE_OFF);
+      player.setVolume((float) checkpoint.optDouble("volume", player.getVolume()));
+      if (checkpoint.optBoolean("autoplay") && player.getPlayerError() != null) player.prepare();
+    }
+    publishOnline();
   }
 
   boolean isOnline() { return !onlineId.isEmpty(); }
@@ -306,6 +334,7 @@ public final class PlaybackService extends MediaSessionService {
     if (onlineId.isEmpty() || onlineListener == null) return;
     try {
       onlineListener.accept(new JSONObject().put("id", onlineId).put("index", player.getCurrentMediaItemIndex())
+          .put("connect_revision", connectConfig == null ? 0 : connectConfig.optInt("revision"))
           .put("position", player.getCurrentPosition() / 1000d).put("duration", player.getDuration() > 0 ? player.getDuration() / 1000d : 0)
           .put("playing", player.isPlaying()).put("playWhenReady", player.getPlayWhenReady())
           .put("radioConnected", isRadio() && radioListening).put("eqSupported", radioEqualizer.supported())

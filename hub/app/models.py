@@ -533,6 +533,8 @@ class PlaybackState(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     device_id: Mapped[str | None] = mapped_column(String(64))
     revision: Mapped[int] = mapped_column(Integer, default=0)
+    applied_revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    commands_json: Mapped[list[Any]] = mapped_column(JSON, default=list)
     snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
@@ -543,6 +545,7 @@ class PlaybackDevice(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     session_id: Mapped[str] = mapped_column(ForeignKey("sessions.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(120))
+    volume: Mapped[float] = mapped_column(Float, default=1, server_default="1")
     seen_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

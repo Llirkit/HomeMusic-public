@@ -9,12 +9,13 @@ export function PlaybackDevices() {
     <h3 className="font-bold">Слушать на устройстве</h3>
     <p className="text-sm text-muted">{owner ? `Сейчас выбрано: ${owner.name}.` : 'Продолжите последнее прослушивание на любом устройстве.'} Откройте HomeMusic под тем же аккаунтом на телефоне или компьютере.</p>
     <ul className="space-y-2">{state.devices.map(device => <li key={device.id}>
-      <Button block disabled={state.busy || !state.snapshot} onClick={() => void transferPlayback(device.id)}>
+      <Button block disabled={state.busy || device.id === state.device_id} onClick={() => void transferPlayback(device.id)}>
         {device.name}{device.id === deviceId ? ' (это устройство)' : ''}{device.id === state.device_id ? ' · Выбрано' : ''}
       </Button>
     </li>)}</ul>
-    {!state.snapshot && <p className="text-sm text-muted">Включите трек, чтобы передать его на другое устройство.</p>}
+    {!state.snapshot && <p className="text-sm text-muted">Выберите устройство, затем включите музыку.</p>}
     {state.busy && <p role="status" className="text-sm text-muted">Переносим воспроизведение…</p>}
+    {state.pending && <p role="status" className="text-sm text-muted">Ждём подтверждения устройства…</p>}
     {state.error && <p role="alert" className="text-sm text-danger">{state.error}</p>}
     <Button small disabled={state.busy} onClick={refreshPlaybackDevices}>Обновить устройства</Button>
   </section>;

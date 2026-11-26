@@ -2,7 +2,7 @@ import type { ListenState } from './listen';
 
 /** Media3 owns the sound and timeline; the web player remains the queue/UI source of truth. */
 export type AudioTransport = Pick<HTMLAudioElement, 'src' | 'preload' | 'volume' | 'currentTime' | 'duration' | 'paused' | 'ended' | 'readyState' | 'addEventListener' | 'getAttribute' | 'removeAttribute' | 'load' | 'play' | 'pause'>;
-type Snapshot = { id: string; index: number; position: number; duration: number; playing: boolean; playWhenReady: boolean; state: number; cycle: number; error: boolean };
+type Snapshot = { id: string; index: number; position: number; duration: number; playing: boolean; playWhenReady: boolean; state: number; cycle: number; error: boolean; connect_revision?: number };
 declare global {
   interface Window {
     SpotikPlayback?: { command(json: string): void };
@@ -51,7 +51,7 @@ export class AndroidAudio extends EventTarget implements AudioTransport {
   }
   syncQueue(load = false) {
     const s = this.getState();
-    if (!this.source || !s.track || this.adopting) return;
+    if (!this.source || !s.track || s.remote || this.adopting) return;
     if (!load && s.queue === this.lastQueue && s.index === this.lastIndex && s.repeat === this.lastRepeat) return;
     this.lastQueue = s.queue;
     this.lastIndex = s.index;
@@ -89,6 +89,9 @@ export class AndroidAudio extends EventTarget implements AudioTransport {
   pause() { this.paused = true; this.send('pause'); this.dispatchEvent(new Event('pause')); }
 
   private receive(s: Snapshot) {
+    if ((s.connect_revision ?? 0) > (window.hmConnectRevision ?? 0)) {
+      window.dispatchEvent(new Event('hm:connect-refresh')); return;
+    }
     if (!this.id || s.id !== this.id) return;
     if (s.state === -1) { this.offline(); return; }
     if (s.state === -2) { this.dispatchEvent(new Event('error')); return; }

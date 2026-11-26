@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { routePlayback } from './playbackControl';
 import { api, errorMessage, isAbort, listenStreamUrl } from '../api/client';
 import type { LaunchOrigin, ListenOut } from '../api/types';
 import { startDownload } from './actions';
@@ -55,6 +56,7 @@ export type RepeatMode = 'off' | 'all' | 'one';
 export type ListenPhase = 'resolving' | 'loading' | 'playing' | 'paused' | 'ended' | 'error';
 
 export interface ListenState {
+  remote: boolean;
   track: ListenTrack | null;
   /** the list the track was started from (album, search results); `index` is the track's place in it */
   queue: readonly ListenTrack[];
@@ -104,6 +106,7 @@ const savedModes = ((): { shuffle: boolean; smart: boolean; repeat: RepeatMode }
 let smartChosen = savedModes.smart;
 
 let state: ListenState = {
+  remote: false,
   track: null,
   queue: [],
   index: 0,
@@ -128,7 +131,7 @@ function set(patch: Partial<ListenState>) {
   persistListening(Object.keys(patch).some((key) => key !== 'position' && key !== 'duration'));
   if (!!state.track !== shown) webPlayerShown(!!state.track);
   for (const fn of subscribers) fn();
-  if (audio instanceof AndroidAudio) queueMicrotask(() => { if (audio instanceof AndroidAudio) audio.syncQueue(); });
+  if (!state.remote && audio instanceof AndroidAudio) queueMicrotask(() => { if (!state.remote && audio instanceof AndroidAudio) audio.syncQueue(); });
 }
 
 export function subscribeListening(fn: () => void) {
@@ -139,7 +142,9 @@ export function subscribeListening(fn: () => void) {
 }
 
 /** The page's own player is playing or about to (a reload would cut the sound). */
-export const listenBusy = () => !!state.track && (state.phase === 'playing' || state.phase === 'resolving' || state.phase === 'loading');
+export const listenBusy = () => !state.remote && !!state.track && (state.phase === 'playing' || state.phase === 'resolving' || state.phase === 'loading');
+let localVolume = savedVolume;
+export const getDeviceVolume = () => localVolume;
 
 export const getListenState = (): ListenState => state;
 
@@ -389,7 +394,7 @@ function start(queue: readonly ListenTrack[], index: number, auto = false, posit
   resolving = ctl;
   // Media3 receives the starting position in its load command and owns subsequent timeline updates.
   pendingSeek = a instanceof AndroidAudio ? 0 : position;
-  set({ track, queue, index, context: listContext, phase: autoplay ? 'resolving' : 'paused', info: null, error: null, position, duration: track.duration_s ?? 0 });
+  set({ remote: false, track, queue, index, context: listContext, phase: autoplay ? 'resolving' : 'paused', info: null, error: null, position, duration: track.duration_s ?? 0 });
   const previousBlob = playingBlob;
   playingBlob = a instanceof AndroidAudio ? null : takePreloadedAudio(track.ref);
   a.src = playingBlob ?? listenStreamUrl(track.ref);
@@ -529,6 +534,13 @@ export function listen(track: ListenTrack, queue?: readonly ListenTrack[], conte
 }
 
 function startList(track: ListenTrack, queue?: readonly ListenTrack[], context?: string, origin?: LaunchOrigin) {
+  const source = queue?.some(t => t.ref === track.ref) ? queue : [track];
+  const atSource = Math.max(0, source.findIndex(t => t.ref === track.ref));
+  const shuffle = state.shuffle && !(context ?? routeContext()).startsWith('wave:');
+  const ordered = shuffle ? [source[atSource], ...shuffled(source.filter((_, i) => i !== atSource))] : source;
+  if (routePlayback({ action: 'start', snapshot: { version: 1, queue: ordered, index: shuffle ? 0 : atSource,
+    context: context ?? routeContext(), launch: newLaunch(context ?? routeContext(), origin), position: 0, autoplay: true,
+    shuffle: state.shuffle, repeat: state.repeat, originalOrder: shuffle ? source.map(t => ordered.indexOf(t)) : null } })) return;
   listContext = context ?? routeContext();
   listLaunch = newLaunch(listContext, origin);
   const list = queue?.some((t) => t.ref === track.ref) ? queue : [track];
@@ -578,6 +590,9 @@ export interface SavedSession {
   launch?: Launch;
   position: number;
   autoplay: boolean;
+  volume?: number;
+  phase?: ListenPhase;
+  error?: string | null;
   shuffle: boolean;
   repeat: RepeatMode;
   /** Indices retain object identity, including duplicate tracks, after JSON serialization. */
@@ -587,7 +602,7 @@ export interface SavedSession {
 
 export function playbackCheckpoint(): SavedSession | null {
   return state.track ? { version: 1, queue: state.queue, index: state.index, context: state.context,
-    launch: listLaunch, position: state.position, autoplay: listenBusy(), shuffle: state.shuffle,
+    launch: listLaunch, position: state.position, autoplay: listenBusy(), volume: state.volume, phase: state.phase, error: state.error, shuffle: state.shuffle,
     smart: state.smart, repeat: state.repeat,
     originalOrder: unshuffled?.map((t) => state.queue.indexOf(t)).filter(i => i >= 0) ?? null } : null;
 }
@@ -597,6 +612,7 @@ export function adoptPlayback(saved: SavedSession, autoplay = false) {
   unshuffled = saved.originalOrder?.map(i => saved.queue[i]) ?? null;
   listContext = saved.context;
   listLaunch = saved.launch ?? newLaunch(saved.context);
+  setVolume(saved.volume ?? localVolume);
   set({ shuffle: saved.shuffle, smart: saved.smart === true, repeat: saved.repeat });
   start(saved.queue, saved.index, false, saved.position, autoplay);
   smartHooks?.restored();
@@ -611,8 +627,25 @@ export function previewPlayback(saved: SavedSession) {
   unshuffled = saved.originalOrder?.map(i => saved.queue[i]) ?? null;
   const track = saved.queue[saved.index];
   set({ track, queue: saved.queue, index: saved.index, context: saved.context, position: saved.position,
-    duration: track.duration_s ?? 0, phase: 'paused', shuffle: saved.shuffle, smart: saved.smart === true,
-    repeat: saved.repeat, info: null, error: null });
+    remote: true, duration: track.duration_s ?? 0, phase: saved.phase ?? (saved.autoplay ? 'playing' : 'paused'),
+    volume: saved.volume ?? state.volume, shuffle: saved.shuffle, smart: saved.smart === true,
+    repeat: saved.repeat, info: null, error: saved.error ?? null });
+}
+
+export function previewPosition(position: number) { if (state.remote) set({ position }); }
+
+/** Apply an acknowledged account command on its selected output without restarting an unchanged stream. */
+export function applyPlayback(saved: SavedSession, action: string) {
+  if (action === 'start' || state.remote || !audio?.getAttribute('src') || state.context !== saved.context ||
+      state.track?.ref !== saved.queue[saved.index]?.ref) return adoptPlayback(saved, saved.autoplay);
+  const sameQueue = state.queue.length === saved.queue.length && state.queue.every((t, i) => t.ref === saved.queue[i].ref);
+  const queue = sameQueue ? state.queue : saved.queue;
+  unshuffled = saved.originalOrder?.map(i => queue[i]) ?? null;
+  set({ queue, index: saved.index, track: queue[saved.index], shuffle: saved.shuffle, repeat: saved.repeat, smart: saved.smart === true });
+  if (saved.volume !== undefined && saved.volume !== state.volume) setVolume(saved.volume);
+  if (['seek', 'previous', 'play_index', 'next'].includes(action) || Math.abs(state.position - saved.position) > 1) seek(saved.position);
+  if (!saved.autoplay) pause();
+  else if (!listenBusy()) resume();
 }
 
 function persistListening(force = false) {
@@ -680,6 +713,7 @@ function setModes(patch: Partial<Pick<ListenState, 'shuffle' | 'repeat'>>) {
 /** On: the tracks after the current one go in random order; off: back to the list's own order (a smart shuffle ends:
  * its recommendations leave the queue). */
 export function setShuffle(on: boolean) {
+  if (routePlayback({ action: 'shuffle', shuffle: on })) return;
   const wasSmart = state.smart;
   if (!on) smartChosen = false;
   setModes({ shuffle: on });
@@ -713,6 +747,7 @@ export function setShuffle(on: boolean) {
 /** The shuffle button: off → shuffle → smart shuffle (only where the playing list can have one: a playlist or
  * «Понравившиеся», and the setting on) → off. */
 export function cycleShuffle() {
+  if (state.remote && routePlayback({ action: 'shuffle' })) return;
   if (onWave()) return;
   if (!state.shuffle) return setShuffle(true);
   if (state.smart) return setShuffle(false);
@@ -781,12 +816,14 @@ export function markOwn(ref: string) {
 
 /** off → all → one → off. */
 export function cycleRepeat() {
+  if (routePlayback({ action: 'repeat' })) return;
   setModes({ repeat: state.repeat === 'off' ? 'all' : state.repeat === 'all' ? 'one' : 'off' });
   prefetchNext();
 }
 
 /** «Играть следующим»: right after the current track (when nothing plays, they start now). */
 export function playNext(tracks: readonly ListenTrack[]) {
+  if (state.track && routePlayback({ action: 'add_next', tracks })) return;
   if (!tracks.length) return;
   if (!state.track) return listen(tracks[0], tracks);
   const added = tracks.map((t) => ({ ...t })); // own objects: the same track may be in the queue twice
@@ -796,6 +833,7 @@ export function playNext(tracks: readonly ListenTrack[]) {
 
 /** «Добавить в очередь»: after the last track (when nothing plays, they start now). */
 export function addToQueue(tracks: readonly ListenTrack[]) {
+  if (state.track && routePlayback({ action: 'append', tracks })) return;
   if (!tracks.length) return;
   if (!state.track) return listen(tracks[0], tracks);
   const ended = state.phase === 'ended';
@@ -806,6 +844,7 @@ export function addToQueue(tracks: readonly ListenTrack[]) {
 
 /** Takes a track that is not the current one out of the queue. */
 export function removeFromQueue(index: number) {
+  if (routePlayback({ action: 'remove', index })) return;
   if (index === state.index || index < 0 || index >= state.queue.length) return;
   set({ queue: state.queue.filter((_, i) => i !== index), index: index < state.index ? state.index - 1 : state.index });
   prefetchNext();
@@ -813,6 +852,7 @@ export function removeFromQueue(index: number) {
 
 /** Moves a track of the queue to another place (the current one too). */
 export function moveInQueue(from: number, to: number) {
+  if (routePlayback({ action: 'move', index: from, to_index: to })) return;
   const q = [...state.queue];
   if (from === to || from < 0 || to < 0 || from >= q.length || to >= q.length) return;
   const current = q[state.index];
@@ -825,6 +865,7 @@ export function moveInQueue(from: number, to: number) {
 /** A tap on a track of the queue: it plays now, the queue stays as it is. */
 export function playQueueAt(index: number) {
   if (index === state.index) return toggle();
+  if (routePlayback({ action: 'play_index', index })) return;
   if (index >= 0 && index < state.queue.length) start(state.queue, index);
 }
 
@@ -833,6 +874,7 @@ export function extendQueue(list: readonly ListenTrack[]) {
   const q = state.queue;
   // the playing queue is the list as it was: the same refs in the same order
   if (!state.track || list.length <= q.length || q.some((t, i) => t.ref !== list[i].ref)) return;
+  if (routePlayback({ action: 'append', tracks: list.slice(q.length) })) return;
   set({ queue: [...q, ...list.slice(q.length)] });
   if (state.phase !== 'error' && state.phase !== 'ended') prefetchNext();
 }
@@ -852,6 +894,7 @@ export const hasPrev = (s: ListenState) => s.index > 0;
 
 /** Plays the next track of the queue; false at its end. */
 export function next(): boolean {
+  if (routePlayback({ action: 'next' })) return true;
   if (hasNext(state)) start(state.queue, state.index + 1);
   else if (state.repeat === 'all' && state.track && !onWave()) start(state.queue, 0);
   else return false;
@@ -860,6 +903,7 @@ export function next(): boolean {
 
 /** ⏮: back to the start of the track, or (near its start) the previous track. */
 export function prev() {
+  if (routePlayback({ action: 'previous' })) return;
   if (hasPrev(state) && (state.position < RESTART_AFTER_S || state.phase === 'error')) start(state.queue, state.index - 1);
   else if (state.track) {
     seek(0);
@@ -868,12 +912,13 @@ export function prev() {
 }
 
 export function toggle() {
+  if (routePlayback({ action: 'toggle' })) return;
   if (state.phase === 'playing' || state.phase === 'loading' || state.phase === 'resolving') pause();
   else resume();
 }
 
 function resume() {
-  if (!window.dispatchEvent(new Event('hm:resume-playback', { cancelable: true }))) return;
+  if (routePlayback({ action: 'play' })) return;
   const a = audio;
   const track = state.track;
   if (!a || !track) return;
@@ -884,6 +929,7 @@ function resume() {
 }
 
 export function pause() {
+  if (routePlayback({ action: 'pause' })) return;
   if (!audio || !state.track || state.phase === 'error' || state.phase === 'ended') return;
   playRequest++;
   audio.pause();
@@ -892,13 +938,16 @@ export function pause() {
 
 export function setVolume(volume: number) {
   if (!Number.isFinite(volume)) return;
+  if (routePlayback({ action: 'volume', volume })) return;
   const value = Math.max(0, Math.min(1, volume));
+  localVolume = value;
   if (audio) audio.volume = value;
   set({ volume: value });
   try { localStorage.setItem(VOLUME_KEY, String(value)); } catch { /* storage is optional */ }
 }
 
 export function seek(seconds: number) {
+  if (routePlayback({ action: 'seek', position: seconds })) return;
   if (!audio || !Number.isFinite(seconds)) return;
   if (audio instanceof AndroidAudio) { pendingSeek = 0; audio.currentTime = Math.max(0, seconds); }
   else if (audio.readyState === HTMLMediaElement.HAVE_NOTHING) pendingSeek = Math.max(0, seconds);
@@ -931,7 +980,7 @@ function releaseListening(interrupted = false) {
 
 export function stopListening() {
   releaseListening();
-  set({ track: null, queue: [], index: 0, info: null, error: null, phase: 'paused', position: 0, duration: 0, smart: false });
+  set({ remote: false, track: null, queue: [], index: 0, info: null, error: null, phase: 'paused', position: 0, duration: 0, smart: false });
 }
 
 /** Queues one catalog track (the Hub downloads the file that was listened to, if any). */

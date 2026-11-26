@@ -70,7 +70,7 @@ export function restoreWave(account: number | null, force = false) {
   session = null;
   sessionAccount = account;
   const st = getListenState();
-  if (account !== null && !canPlayAll() && st.track && st.context.startsWith('wave:')) {
+  if (account !== null && !canPlayAll() && !st.remote && st.track && st.context.startsWith('wave:')) {
     const id = st.context.slice('wave:'.length);
     let saved: { id?: string; title?: string; refs?: string[]; songs?: string[]; pending?: PlayEventIn[] } | null = null;
     try { saved = JSON.parse(localStorage.getItem(SESSION_KEY + account) ?? 'null'); } catch { /* rebuild from the queue */ }
@@ -211,6 +211,7 @@ function end() {
 }
 
 onPlayEvent((e) => {
+  if (getListenState().remote) return;
   if (e.kind === 'progress' || e.kind === 'interrupted' || e.kind === 'error') return;
   if ((e.target_type && e.target_type !== 'track') || e.reverts_event_id) return;
   const s = session;

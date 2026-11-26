@@ -57,7 +57,9 @@ export function PlayerPage() {
         <div className="flex min-h-14 items-center px-2">
           <IconButton icon="down" label="Свернуть" onClick={() => goBack('/home')} />
         </div>
-        <Empty icon="note" title="Сейчас ничего не играет" text="Выберите трек, альбом или «Мою волну»." />
+        <Empty icon="note" title="Сейчас ничего не играет" text="Выберите трек, альбом или «Мою волну».">
+          <AudioOutputButton />
+        </Empty>
       </div>
     );
 

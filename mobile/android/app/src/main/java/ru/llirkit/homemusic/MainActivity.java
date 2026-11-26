@@ -212,6 +212,7 @@ public final class MainActivity extends Activity {
         if (json == null || json.length() > 2 * 1024 * 1024) return;
         ui(() -> dispatchOnline(json, 0));
       }
+      @JavascriptInterface public String deviceName() { return android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL; }
     }, "SpotikConnect");
     web.addJavascriptInterface(new Object() {
       @JavascriptInterface public void command(String json) {
