@@ -308,8 +308,9 @@ function el(): AudioTransport {
   a.preload = 'auto';
   a.volume = state.volume;
   if (!(a instanceof AndroidAudio)) attachAudioOutput(a);
-  const sync = () =>
-    set({ position: pendingSeek || a.currentTime, duration: Number.isFinite(a.duration) && a.duration > 0 ? a.duration : state.duration });
+  const sync = () => {
+    if (a.getAttribute('src')) set({ position: pendingSeek || a.currentTime, duration: Number.isFinite(a.duration) && a.duration > 0 ? a.duration : state.duration });
+  };
   a.addEventListener('loadedmetadata', () => {
     if (pendingSeek > 0) {
       a.currentTime = Number.isFinite(a.duration) ? Math.min(pendingSeek, Math.max(0, a.duration - 0.1)) : pendingSeek;
@@ -321,6 +322,7 @@ function el(): AudioTransport {
   a.addEventListener('durationchange', sync);
   a.addEventListener('play', pauseNative);
   a.addEventListener('playing', () => {
+    if (!a.getAttribute('src')) return;
     set({ phase: 'playing', error: null });
     refreshInfo();
     reportStart();
@@ -333,17 +335,20 @@ function el(): AudioTransport {
     if (played?.started && !a.paused && a.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) played.anchor = performance.now();
   });
   a.addEventListener('waiting', () => {
+    if (!a.getAttribute('src')) return;
     clearAudioPreload();
     suspendClock();
     if (state.phase === 'playing') set({ phase: 'loading' });
   });
   // Pauses from outside (audio focus, lock screen); switching tracks also fires one, during 'resolving'.
   a.addEventListener('pause', () => {
+    if (!a.getAttribute('src')) return;
     suspendClock();
     if (!a.ended && (state.phase === 'playing' || state.phase === 'loading' || a instanceof AndroidAudio && state.phase === 'resolving')) set({ phase: 'paused' });
   });
   // the same element plays on: it was unlocked by the first tap, so the next track may start without one
   a.addEventListener('ended', () => {
+    if (!a.getAttribute('src')) return;
     reportEnd(true);
     if (state.repeat === 'one') start(state.queue, state.index, true);
     else if (hasNext(state)) start(state.queue, state.index + 1, true);
@@ -382,7 +387,8 @@ function start(queue: readonly ListenTrack[], index: number, auto = false, posit
   resolving?.abort();
   const ctl = new AbortController();
   resolving = ctl;
-  pendingSeek = position;
+  // Media3 receives the starting position in its load command and owns subsequent timeline updates.
+  pendingSeek = a instanceof AndroidAudio ? 0 : position;
   set({ track, queue, index, context: listContext, phase: autoplay ? 'resolving' : 'paused', info: null, error: null, position, duration: track.duration_s ?? 0 });
   const previousBlob = playingBlob;
   playingBlob = a instanceof AndroidAudio ? null : takePreloadedAudio(track.ref);
@@ -598,6 +604,8 @@ export function adoptPlayback(saved: SavedSession, autoplay = false) {
 
 /** Show another device's queue without opening an audio stream or replacing native offline playback. */
 export function previewPlayback(saved: SavedSession) {
+  // A remote checkpoint belongs to the UI only. Old native/timeupdate callbacks must not own its timeline.
+  if (audio?.getAttribute('src')) releaseListening(true);
   listContext = saved.context;
   listLaunch = saved.launch ?? newLaunch(saved.context);
   unshuffled = saved.originalOrder?.map(i => saved.queue[i]) ?? null;
@@ -892,16 +900,17 @@ export function setVolume(volume: number) {
 
 export function seek(seconds: number) {
   if (!audio || !Number.isFinite(seconds)) return;
-  if (audio.readyState === HTMLMediaElement.HAVE_NOTHING) pendingSeek = Math.max(0, seconds);
+  if (audio instanceof AndroidAudio) { pendingSeek = 0; audio.currentTime = Math.max(0, seconds); }
+  else if (audio.readyState === HTMLMediaElement.HAVE_NOTHING) pendingSeek = Math.max(0, seconds);
   else { pendingSeek = 0; audio.currentTime = seconds; }
   set({ position: seconds });
   persistListening(true);
 }
 
-/** Stops and hides the player. */
-export function stopListening() {
+/** Release the local transport before closing the player or displaying another device's timeline. */
+function releaseListening(interrupted = false) {
   playRequest++;
-  reportEnd();
+  reportEnd(false, false, interrupted);
   resolving?.abort();
   resolving = null;
   prefetching?.ctl.abort();
@@ -917,8 +926,12 @@ export function stopListening() {
   playingBlob = null;
   unshuffled = null;
   smartHooks?.end();
-  set({ track: null, queue: [], index: 0, info: null, error: null, phase: 'paused', position: 0, duration: 0, smart: false });
   if ('mediaSession' in navigator) navigator.mediaSession.metadata = null;
+}
+
+export function stopListening() {
+  releaseListening();
+  set({ track: null, queue: [], index: 0, info: null, error: null, phase: 'paused', position: 0, duration: 0, smart: false });
 }
 
 /** Queues one catalog track (the Hub downloads the file that was listened to, if any). */

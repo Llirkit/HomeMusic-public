@@ -1,9 +1,13 @@
 import { test, expect } from '@playwright/test';
 
-async function playerPage(context, shared, name) {
+async function playerPage(context, shared, name, native = false) {
   const page = await context.newPage();
-  await page.addInitScript(({ name }) => {
+  await page.addInitScript(({ name, native }) => {
     sessionStorage.setItem('hm-device-id', name);
+    if (native) {
+      window.nativeCommands = [];
+      window.SpotikPlayback = { command: text => window.nativeCommands.push(JSON.parse(text)) };
+    }
     window.Audio = class extends EventTarget {
       currentTime = 0; duration = 180; readyState = 4; paused = true; ended = false; src = '';
       play() { this.paused = false; this.dispatchEvent(new Event('loadedmetadata')); this.dispatchEvent(new Event('playing')); return Promise.resolve(); }
@@ -12,7 +16,7 @@ async function playerPage(context, shared, name) {
       getAttribute(key) { return key === 'src' ? this.src : null; }
       removeAttribute() { this.src = ''; }
     };
-  }, { name });
+  }, { name, native });
   await page.route('**/healthz', route => route.fulfill({ json: { ok: true, capabilities: ['typed_favorites_v1'] } }));
   await page.route('**/api/**', async route => {
     const req = route.request(), path = new URL(req.url()).pathname;
@@ -69,7 +73,8 @@ test('pause on PC, open another device and continue the tenth track at the saved
     const phone = await playerPage(phoneContext, shared, 'telephone-1');
     await expect(phone.getByText('Песня 10', { exact: true }).first()).toBeVisible();
     expect(await phone.evaluate(() => window.player.getListenState().phase)).toBe('paused');
-    await phone.getByRole('button', { name: 'Продолжить здесь', exact: true }).click();
+    await expect(phone.getByRole('button', { name: 'Продолжить здесь', exact: true })).toHaveCount(0);
+    await phone.getByRole('button', { name: 'Слушать', exact: true }).click();
     await expect.poll(() => phone.evaluate(() => window.player.getListenState().phase)).toBe('playing');
     expect(await phone.evaluate(() => window.player.getListenState().position)).toBe(73);
     expect(await phone.evaluate(() => window.player.getListenState().queue.length)).toBe(12);
@@ -78,6 +83,60 @@ test('pause on PC, open another device and continue the tenth track at the saved
     await phone.screenshot({ path: testInfo.outputPath('continued-on-phone.png'), fullPage: true });
     expect(await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   } finally { await pcContext.close(); await phoneContext.close(); }
+});
+
+test('Android and PC mirror both directions without restarting sound or accepting obsolete native callbacks', async ({ browser }) => {
+  const shared = state();
+  const context = await browser.newContext();
+  try {
+    const phone = await playerPage(context, shared, 'telephone-1', true);
+    const pc = await playerPage(context, shared, 'computer-1');
+    await startTenth(phone);
+    const loads = () => phone.evaluate(() => window.nativeCommands.filter(c => c.op === 'load'));
+    await expect.poll(loads).toHaveLength(1);
+    const [original] = await loads();
+    const nativeState = async (id, patch = {}) => phone.evaluate(({ id, patch }) => {
+      window.hmAndroidPlayback({ id, index: 9, position: 73, duration: 180, playing: true, playWhenReady: true, state: 3, cycle: 0, error: false, ...patch });
+    }, { id, patch });
+    await nativeState(original.id);
+    await expect.poll(() => shared.device_id).toBe('telephone-1');
+    await expect.poll(() => pc.evaluate(() => window.player.getListenState().track?.ref)).toBe('nd:s10');
+    await expect(pc.getByText('Играет: Телефон Android', { exact: true })).toBeVisible();
+    expect(await pc.evaluate(() => window.player.listenAudio()?.getAttribute('src') ?? null)).toBeFalsy();
+
+    // A normal song click on the PC selects the PC, without a second continuation button.
+    await pc.evaluate(() => window.player.listen({ ref: 'nd:pc', title: 'Песня с компьютера', artist: 'Кино', duration_s: 180 }));
+    await expect.poll(() => shared.device_id).toBe('computer-1');
+    await expect.poll(() => phone.evaluate(() => window.player.getListenState().track?.ref)).toBe('nd:pc');
+    await expect(phone.getByText('Играет: Компьютер', { exact: true })).toBeVisible();
+    await expect.poll(() => phone.evaluate(id => window.nativeCommands.some(c => c.op === 'stop' && c.id === id), original.id)).toBe(true);
+    const commandCount = await phone.evaluate(() => window.nativeCommands.length);
+    await nativeState(original.id, { index: 0, position: 2 });
+    await nativeState(original.id, { state: -1 });
+    expect(await phone.evaluate(() => window.player.getListenState().track?.ref)).toBe('nd:pc');
+    expect(await phone.evaluate(() => window.nativeCommands.length)).toBe(commandCount);
+    await expect.poll(loads).toHaveLength(1);
+
+    await pc.evaluate(() => window.player.seek(83));
+    await expect.poll(() => phone.evaluate(() => window.player.getListenState().position)).toBe(83);
+    await expect(phone.getByRole('button', { name: 'Продолжить здесь', exact: true })).toHaveCount(0);
+    await phone.getByRole('button', { name: 'Слушать', exact: true }).click();
+    await expect.poll(loads).toHaveLength(2);
+    const resumed = (await loads())[1];
+    expect(resumed.queue[0].ref).toBe('nd:pc');
+    expect(resumed.position).toBe(83);
+    await nativeState(resumed.id, { index: 0, position: 84 });
+    await expect.poll(() => shared.device_id).toBe('telephone-1');
+    await expect.poll(() => pc.evaluate(() => window.player.getListenState().position)).toBe(84);
+    await expect(pc.getByText('Играет: Телефон Android', { exact: true })).toBeVisible();
+    expect(await pc.evaluate(() => window.player.listenAudio()?.getAttribute('src') ?? null)).toBeFalsy();
+
+    await phone.getByRole('button', { name: 'Аудиовыход', exact: true }).click();
+    await phone.getByRole('dialog', { name: 'Аудиовыход', exact: true }).getByRole('button', { name: 'Компьютер', exact: true }).click();
+    await expect.poll(() => shared.device_id).toBe('computer-1');
+    await expect.poll(() => pc.evaluate(() => window.player.getListenState().phase)).toBe('playing');
+    await expect.poll(() => phone.evaluate(id => window.nativeCommands.some(c => c.op === 'stop' && c.id === id), resumed.id)).toBe(true);
+  } finally { await context.close(); }
 });
 
 test('select phone in audio output, stop sender, handle unavailable target and keyboard exit', async ({ browser }, testInfo) => {

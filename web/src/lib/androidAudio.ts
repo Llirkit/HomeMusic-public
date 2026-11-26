@@ -42,6 +42,7 @@ export class AndroidAudio extends EventTarget implements AudioTransport {
     if (this.adopting) return;
     this.id = crypto.randomUUID();
     this.readyState = 0;
+    this.duration = 0;
     this.position = 0;
     this.ended = false;
     this.cycle = 0;
@@ -69,7 +70,15 @@ export class AndroidAudio extends EventTarget implements AudioTransport {
   set volume(value: number) { this.loudness = value; this.send('volume', { volume: value }); }
   getAttribute(name: string) { return name === 'src' && this.source ? this.source : null; }
   removeAttribute(name: string) { if (name === 'src') this.source = ''; }
-  load() { if (!this.source) this.send('stop'); }
+  load() {
+    if (this.source) return;
+    const previousId = this.id;
+    // Invalidate before asking Media3 to stop: its final callback may arrive immediately or after a handoff.
+    this.id = '';
+    this.lastQueue = null;
+    this.lastIndex = -1;
+    if (previousId) window.SpotikPlayback?.command(JSON.stringify({ op: 'stop', id: previousId }));
+  }
   async play() {
     if (!this.source) return;
     this.paused = false;

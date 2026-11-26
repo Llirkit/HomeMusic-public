@@ -25,8 +25,7 @@ export function PlaybackLocation() {
   if (!state.snapshot || state.device_id === deviceId) return null;
   const owner = state.devices.find(d => d.id === state.device_id);
   return <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2 text-sm">
-    <span className="text-muted">{owner ? `Выбрано: ${owner.name}` : 'Последнее прослушивание'}</span>
-    <Button small disabled={state.busy} onClick={() => void transferPlayback(deviceId)}>Продолжить здесь</Button>
+    <span className="text-muted">{owner ? `${state.snapshot.autoplay ? 'Играет' : 'Пауза'}: ${owner.name}` : 'Последнее прослушивание'}</span>
     {state.error && <p role="alert" className="w-full text-danger">{state.error}</p>}
   </div>;
 }
