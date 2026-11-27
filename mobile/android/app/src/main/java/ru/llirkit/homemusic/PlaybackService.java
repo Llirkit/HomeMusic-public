@@ -75,8 +75,10 @@ public final class PlaybackService extends MediaSessionService {
       @Override public void onPlayerError(PlaybackException error) {
         MediaItem item = player.getCurrentMediaItem();
         if (item != null && item.localConfiguration != null
-            && "true".equals(item.localConfiguration.uri.getQueryParameter("full")) && player.hasNextMediaItem()) {
-          player.seekToNextMediaItem();
+            && "true".equals(item.localConfiguration.uri.getQueryParameter("full"))
+            && player.getCurrentMediaItemIndex() + 1 < player.getMediaItemCount()) {
+          // Do not wrap an unavailable queue forever when repeat-all is enabled.
+          player.seekTo(player.getCurrentMediaItemIndex() + 1, 0);
           player.prepare();
         }
       }
@@ -131,6 +133,8 @@ public final class PlaybackService extends MediaSessionService {
         }
       }
       String base = getSharedPreferences("app", MODE_PRIVATE).getString("server", BuildConfig.SERVER_URL);
+      String context = message.optString("context");
+      boolean fullOnly = context.startsWith("wave:") || context.startsWith("mix:");
       List<MediaItem> items = new ArrayList<>();
       for (int i = 0; i < tracks.length(); i++) {
         JSONObject track = tracks.getJSONObject(i);
@@ -142,7 +146,7 @@ public final class PlaybackService extends MediaSessionService {
         if (cover.startsWith("/")) cover = base + cover;
         if (Identity.sameOrigin(base, cover)) metadata.setArtworkUri(Uri.parse(cover));
         items.add(new MediaItem.Builder().setMediaId("online:" + i + ":" + ref)
-            .setUri(base + "/api/listen/stream?ref=" + Api.encode(ref) + (message.optString("context").startsWith("wave:") ? "&full=true" : "")).setMediaMetadata(metadata.build()).build());
+            .setUri(base + "/api/listen/stream?ref=" + Api.encode(ref) + (fullOnly ? "&full=true" : "")).setMediaMetadata(metadata.build()).build());
       }
       boolean load = op.equals("load");
       radioToken = ""; radioUrl = ""; radioGeneration++;

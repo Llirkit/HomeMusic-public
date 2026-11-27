@@ -171,8 +171,10 @@ test('restores the output before sound starts and honours a pause while the devi
 });
 
 
-test('wave requires full recordings, discards ordinary preview preloads and skips unavailable songs', async ({ page }) => {
+for (const [label, context] of [['wave', 'wave:qa'], ['daily mix', 'mix:42']]) {
+test(`${label} requires full recordings, discards ordinary preview preloads and skips unavailable songs`, async ({ page }) => {
   await setup(page);
+  await page.evaluate(context => { window.fullTrackContext = context; }, context);
   await expect.poll(() => page.evaluate(() => window.blobs.length)).toBe(1);
   const requests = [];
   await page.route('**/api/listen**', async route => {
@@ -184,7 +186,7 @@ test('wave requires full recordings, discards ordinary preview preloads and skip
     return route.fallback();
   });
   const firstSource = await page.evaluate(() => {
-    window.player.listenAll(window.tracks.slice(1), { shuffle: false, context: 'wave:qa' });
+    window.player.listenAll(window.tracks.slice(1), { shuffle: false, context: window.fullTrackContext });
     return window.player.listenAudio().src;
   });
   expect(firstSource).toContain('full=true');
@@ -192,15 +194,16 @@ test('wave requires full recordings, discards ordinary preview preloads and skip
   expect(requests.filter(r => r.path === '/api/listen').every(r => r.full === 'true')).toBe(true);
   expect(await page.evaluate(() => window.revoked.length)).toBeGreaterThan(0);
   // A media error also advances even before metadata resolution has completed.
-  await page.evaluate(() => window.player.listenAll(window.tracks, { shuffle: false, context: 'wave:qa' }));
+  await page.evaluate(() => window.player.listenAll(window.tracks, { shuffle: false, context: window.fullTrackContext }));
   await page.evaluate(() => window.player.listenAudio().dispatchEvent(new Event('error')));
   await expect.poll(() => page.evaluate(() => window.player.getListenState().track.ref)).toBe('test:3');
   await page.evaluate(() => window.player.listenAudio().dispatchEvent(new Event('error')));
   await expect.poll(() => page.evaluate(() => window.player.getListenState().phase)).toBe('error');
 });
 
-test('wave preloads only full audio and ordinary listening still allows previews', async ({ page }) => {
+test(`${label} preloads only full audio and ordinary listening still allows previews`, async ({ page }) => {
   await setup(page);
+  await page.evaluate(context => { window.fullTrackContext = context; }, context);
   await page.evaluate(() => window.player.stopListening());
   const requests = [];
   await page.route('**/api/listen**', route => {
@@ -208,7 +211,7 @@ test('wave preloads only full audio and ordinary listening still allows previews
     requests.push({ path: url.pathname, ref: url.searchParams.get('ref'), full: url.searchParams.get('full') });
     return route.fallback();
   });
-  await page.evaluate(() => window.player.listenAll(window.tracks, { shuffle: false, context: 'wave:qa' }));
+  await page.evaluate(() => window.player.listenAll(window.tracks, { shuffle: false, context: window.fullTrackContext }));
   await expect.poll(() => requests.some(r => r.path.endsWith('/stream') && r.ref === 'test:2')).toBe(true);
   expect(requests.every(r => r.full === 'true')).toBe(true);
   await page.evaluate(() => window.player.next());
@@ -220,12 +223,14 @@ test('wave preloads only full audio and ordinary listening still allows previews
 });
 
 
-test('an unavailable paused wave restored on another device never starts sound', async ({ page }) => {
+test(`an unavailable paused ${label} restored on another device never starts sound`, async ({ page }) => {
   await setup(page);
+  await page.evaluate(context => { window.fullTrackContext = context; }, context);
   await page.route('**/api/listen?**', route => route.fulfill({ status: 503, json: { detail: 'Полная версия недоступна' } }));
   await page.evaluate(() => window.player.adoptPlayback({ queue: window.tracks, index: 0, position: 0,
-    context: 'wave:paused', shuffle: false, repeat: 'off', autoplay: false }, false));
+    context: window.fullTrackContext, shuffle: false, repeat: 'off', autoplay: false }, false));
   await expect.poll(() => page.evaluate(() => window.player.getListenState().phase)).toBe('error');
   expect(await page.evaluate(() => window.player.getListenState().track.ref)).toBe('test:1');
   expect(await page.evaluate(() => window.player.listenAudio().paused)).toBe(true);
 });
+}

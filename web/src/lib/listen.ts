@@ -363,7 +363,7 @@ function el(): AudioTransport {
   a.addEventListener('error', () => {
     if (a.getAttribute('src')) {
       reportEnd(false, true);
-      if (onWave() && !a.paused && hasNext(state)) return void start(state.queue, state.index + 1, true);
+      if (fullTracksOnly() && !a.paused && hasNext(state)) return void start(state.queue, state.index + 1, true);
       set({ phase: 'error', error: state.error ?? 'Не удалось воспроизвести' });
     }
   });
@@ -400,8 +400,8 @@ function start(queue: readonly ListenTrack[], index: number, auto = false, posit
   pendingSeek = a instanceof AndroidAudio ? 0 : position;
   set({ remote: false, track, queue, index, context: listContext, phase: autoplay ? 'resolving' : 'paused', info: null, error: null, position, duration: track.duration_s ?? 0 });
   const previousBlob = playingBlob;
-  playingBlob = a instanceof AndroidAudio ? null : takePreloadedAudio(track.ref, onWave());
-  a.src = playingBlob ?? listenStreamUrl(track.ref, onWave());
+  playingBlob = a instanceof AndroidAudio ? null : takePreloadedAudio(track.ref, fullTracksOnly());
+  a.src = playingBlob ?? listenStreamUrl(track.ref, fullTracksOnly());
   if (previousBlob) URL.revokeObjectURL(previousBlob);
   if (autoplay) play(a);
   else a.load();
@@ -409,7 +409,7 @@ function start(queue: readonly ListenTrack[], index: number, auto = false, posit
   // the prefetch of this very track (it was next) is the request to wait for: don't abort it
   if (prefetching?.ref !== track.ref) prefetching?.ctl.abort();
   prefetching = null;
-  api.listen(track.ref, ctl.signal, onWave()).then(
+  api.listen(track.ref, ctl.signal, fullTracksOnly()).then(
     (info) => {
       if (resolving !== ctl) return;
       set({ info, duration: info.kind === 'preview' ? (info.duration_s ?? 30) : state.duration });
@@ -418,7 +418,7 @@ function start(queue: readonly ListenTrack[], index: number, auto = false, posit
     },
     (e: unknown) => {
       if (isAbort(e) || resolving !== ctl) return;
-      if ((auto || onWave()) && autoplay && hasNext(state)) return void start(state.queue, state.index + 1, true);
+      if ((auto || fullTracksOnly()) && autoplay && hasNext(state)) return void start(state.queue, state.index + 1, true);
       set({ phase: 'error', error: errorMessage(e) });
       a.pause();
     },
@@ -432,7 +432,7 @@ function refreshInfo() {
   const ref = state.track?.ref;
   if (!ref || refreshed === ref || state.info?.kind !== 'full') return;
   refreshed = ref;
-  api.listen(ref, undefined, onWave()).then(
+  api.listen(ref, undefined, fullTracksOnly()).then(
     (info) => state.track?.ref === ref && set({ info }),
     () => {},
   );
@@ -451,7 +451,7 @@ function prefetchNext() {
   prefetching?.ctl.abort();
   const ctl = new AbortController();
   prefetching = { ref: nextTrack.ref, ctl };
-  api.listen(nextTrack.ref, ctl.signal, onWave()).catch(() => {
+  api.listen(nextTrack.ref, ctl.signal, fullTracksOnly()).catch(() => {
     /* the track itself will show the error when it is reached */
   });
 }
@@ -461,7 +461,7 @@ function preloadUpcomingAudio() {
   const nextTrack = state.repeat === 'one' ? undefined : state.queue[state.index + 1] ??
     (state.repeat === 'all' && !onWave() ? state.queue[0] : undefined);
   // Never compete with initial playback or a stalled current file.
-  if (state.phase === 'playing') preloadAudio(nextTrack?.ref ?? null, onWave());
+  if (state.phase === 'playing') preloadAudio(nextTrack?.ref ?? null, fullTracksOnly());
   else clearAudioPreload();
 }
 
@@ -694,6 +694,8 @@ export function restoreListening(account: number | null, restore = true) {
 }
 
 const onWave = () => state.context.startsWith('wave:');
+// Recommendations play complete recordings; other catalog listening can still offer previews.
+const fullTracksOnly = () => onWave() || state.context.startsWith('mix:');
 
 export function shuffled<T>(list: readonly T[]): T[] {
   const out = [...list];
