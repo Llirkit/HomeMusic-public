@@ -361,7 +361,11 @@ function el(): AudioTransport {
     else set({ phase: 'ended' });
   });
   a.addEventListener('error', () => {
-    if (a.getAttribute('src')) { reportEnd(false, true); set({ phase: 'error', error: state.error ?? 'Не удалось воспроизвести' }); }
+    if (a.getAttribute('src')) {
+      reportEnd(false, true);
+      if (onWave() && !a.paused && hasNext(state)) return void start(state.queue, state.index + 1, true);
+      set({ phase: 'error', error: state.error ?? 'Не удалось воспроизвести' });
+    }
   });
   // the app's player started: one player on screen, so this one closes (the app shows its own again)
   window.addEventListener(NATIVE_PLAYING_EVENT, stopListening);
@@ -396,8 +400,8 @@ function start(queue: readonly ListenTrack[], index: number, auto = false, posit
   pendingSeek = a instanceof AndroidAudio ? 0 : position;
   set({ remote: false, track, queue, index, context: listContext, phase: autoplay ? 'resolving' : 'paused', info: null, error: null, position, duration: track.duration_s ?? 0 });
   const previousBlob = playingBlob;
-  playingBlob = a instanceof AndroidAudio ? null : takePreloadedAudio(track.ref);
-  a.src = playingBlob ?? listenStreamUrl(track.ref);
+  playingBlob = a instanceof AndroidAudio ? null : takePreloadedAudio(track.ref, onWave());
+  a.src = playingBlob ?? listenStreamUrl(track.ref, onWave());
   if (previousBlob) URL.revokeObjectURL(previousBlob);
   if (autoplay) play(a);
   else a.load();
@@ -405,7 +409,7 @@ function start(queue: readonly ListenTrack[], index: number, auto = false, posit
   // the prefetch of this very track (it was next) is the request to wait for: don't abort it
   if (prefetching?.ref !== track.ref) prefetching?.ctl.abort();
   prefetching = null;
-  api.listen(track.ref, ctl.signal).then(
+  api.listen(track.ref, ctl.signal, onWave()).then(
     (info) => {
       if (resolving !== ctl) return;
       set({ info, duration: info.kind === 'preview' ? (info.duration_s ?? 30) : state.duration });
@@ -414,7 +418,7 @@ function start(queue: readonly ListenTrack[], index: number, auto = false, posit
     },
     (e: unknown) => {
       if (isAbort(e) || resolving !== ctl) return;
-      if (auto && hasNext(state)) return void start(state.queue, state.index + 1, true);
+      if ((auto || onWave()) && autoplay && hasNext(state)) return void start(state.queue, state.index + 1, true);
       set({ phase: 'error', error: errorMessage(e) });
       a.pause();
     },
@@ -428,7 +432,7 @@ function refreshInfo() {
   const ref = state.track?.ref;
   if (!ref || refreshed === ref || state.info?.kind !== 'full') return;
   refreshed = ref;
-  api.listen(ref).then(
+  api.listen(ref, undefined, onWave()).then(
     (info) => state.track?.ref === ref && set({ info }),
     () => {},
   );
@@ -447,7 +451,7 @@ function prefetchNext() {
   prefetching?.ctl.abort();
   const ctl = new AbortController();
   prefetching = { ref: nextTrack.ref, ctl };
-  api.listen(nextTrack.ref, ctl.signal).catch(() => {
+  api.listen(nextTrack.ref, ctl.signal, onWave()).catch(() => {
     /* the track itself will show the error when it is reached */
   });
 }
@@ -457,7 +461,7 @@ function preloadUpcomingAudio() {
   const nextTrack = state.repeat === 'one' ? undefined : state.queue[state.index + 1] ??
     (state.repeat === 'all' && !onWave() ? state.queue[0] : undefined);
   // Never compete with initial playback or a stalled current file.
-  if (state.phase === 'playing') preloadAudio(nextTrack?.ref ?? null);
+  if (state.phase === 'playing') preloadAudio(nextTrack?.ref ?? null, onWave());
   else clearAudioPreload();
 }
 

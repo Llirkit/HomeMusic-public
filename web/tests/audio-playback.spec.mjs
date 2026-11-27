@@ -169,3 +169,63 @@ test('restores the output before sound starts and honours a pause while the devi
   await page.evaluate(() => window.player.toggle());
   await expect.poll(() => page.evaluate(() => window.player.getListenState().phase)).toBe('playing');
 });
+
+
+test('wave requires full recordings, discards ordinary preview preloads and skips unavailable songs', async ({ page }) => {
+  await setup(page);
+  await expect.poll(() => page.evaluate(() => window.blobs.length)).toBe(1);
+  const requests = [];
+  await page.route('**/api/listen**', async route => {
+    const url = new URL(route.request().url());
+    requests.push({ path: url.pathname, ref: url.searchParams.get('ref'), full: url.searchParams.get('full') });
+    if (url.pathname === '/api/listen' && url.searchParams.get('ref') === 'test:2') {
+      return route.fulfill({ status: 503, json: { detail: 'Полная версия недоступна' } });
+    }
+    return route.fallback();
+  });
+  const firstSource = await page.evaluate(() => {
+    window.player.listenAll(window.tracks.slice(1), { shuffle: false, context: 'wave:qa' });
+    return window.player.listenAudio().src;
+  });
+  expect(firstSource).toContain('full=true');
+  await expect.poll(() => page.evaluate(() => window.player.getListenState().track.ref)).toBe('test:3');
+  expect(requests.filter(r => r.path === '/api/listen').every(r => r.full === 'true')).toBe(true);
+  expect(await page.evaluate(() => window.revoked.length)).toBeGreaterThan(0);
+  // A media error also advances even before metadata resolution has completed.
+  await page.evaluate(() => window.player.listenAll(window.tracks, { shuffle: false, context: 'wave:qa' }));
+  await page.evaluate(() => window.player.listenAudio().dispatchEvent(new Event('error')));
+  await expect.poll(() => page.evaluate(() => window.player.getListenState().track.ref)).toBe('test:3');
+  await page.evaluate(() => window.player.listenAudio().dispatchEvent(new Event('error')));
+  await expect.poll(() => page.evaluate(() => window.player.getListenState().phase)).toBe('error');
+});
+
+test('wave preloads only full audio and ordinary listening still allows previews', async ({ page }) => {
+  await setup(page);
+  await page.evaluate(() => window.player.stopListening());
+  const requests = [];
+  await page.route('**/api/listen**', route => {
+    const url = new URL(route.request().url());
+    requests.push({ path: url.pathname, ref: url.searchParams.get('ref'), full: url.searchParams.get('full') });
+    return route.fallback();
+  });
+  await page.evaluate(() => window.player.listenAll(window.tracks, { shuffle: false, context: 'wave:qa' }));
+  await expect.poll(() => requests.some(r => r.path.endsWith('/stream') && r.ref === 'test:2')).toBe(true);
+  expect(requests.every(r => r.full === 'true')).toBe(true);
+  await page.evaluate(() => window.player.next());
+  expect(await page.evaluate(() => window.player.listenAudio().src)).toMatch(/^blob:/);
+  requests.length = 0;
+  await page.evaluate(() => window.player.listenAll(window.tracks, { shuffle: false, context: 'album' }));
+  await expect.poll(() => requests.some(r => r.path === '/api/listen')).toBe(true);
+  expect(requests.filter(r => r.path === '/api/listen').every(r => r.full === null)).toBe(true);
+});
+
+
+test('an unavailable paused wave restored on another device never starts sound', async ({ page }) => {
+  await setup(page);
+  await page.route('**/api/listen?**', route => route.fulfill({ status: 503, json: { detail: 'Полная версия недоступна' } }));
+  await page.evaluate(() => window.player.adoptPlayback({ queue: window.tracks, index: 0, position: 0,
+    context: 'wave:paused', shuffle: false, repeat: 'off', autoplay: false }, false));
+  await expect.poll(() => page.evaluate(() => window.player.getListenState().phase)).toBe('error');
+  expect(await page.evaluate(() => window.player.getListenState().track.ref)).toBe('test:1');
+  expect(await page.evaluate(() => window.player.listenAudio().paused)).toBe(true);
+});

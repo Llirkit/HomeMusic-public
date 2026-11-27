@@ -245,9 +245,8 @@ A picked re-upload (`items[].candidate` with `extra.reupload`) is looked up in D
 
 `ListenOut.kind`: `full` (the file a download takes: `provider`, `bitrate_kbps`, `page_url`), `preview` (no source has it —
 Deezer's 30 s preview, show «превью 30 сек»), `library` (already owned: the own file; `nd_song_id` once Navidrome has scanned it).
-`GET /api/listen/stream?ref=…&full=1` requires a full recording: a remembered/cached preview is re-resolved,
-the regular sources are followed by `sources.download_fallback`, and a preview-only result returns `503`
-with a Russian explanation instead of preview audio. Without `full`, browser preview behavior is preserved.
+`GET /api/listen?ref=…&full=1` и `GET /api/listen/stream?ref=…&full=1` требуют полной записи. «Моя волна» передаёт `full=true` при разрешении, воспроизведении и предзагрузке; недоступная песня пропускается без превью. Строгое разрешение сохраняет `full=true` в `stream_url`. Сохранённое превью перепроверяется; после обычных источников проверяется `sources.download_fallback`.
+Если доступно только превью, сервер возвращает `503` с пояснением вместо аудио. Без `full` обычное прослушивание превью сохраняется.
 Successful stream responses include `X-HomeMusic-Listen-Kind: full|library|preview`, independently of `q`.
 Owned-file lookup precedes optional album/name enrichment. Playback bounds optional album lookup to 1.5 s,
 original-name lookup to 3 s, each regular search to 6 s, fallback search to 8 s, and file probing to 25 s

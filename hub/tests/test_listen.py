@@ -148,7 +148,7 @@ async def test_slow_listen_releases_auth_connection_before_resolving_and_allows_
 
     entered, release = asyncio.Event(), asyncio.Event()
 
-    async def choose(ref):
+    async def choose(ref, *, full=False):
         entered.set()
         await release.wait()
         return Choice(ref=ref, kind="preview", artist="QA", title="Song", duration_s=214)
@@ -456,6 +456,26 @@ async def test_full_song_request_never_plays_a_preview(env):
     assert not any(call.request.url.host == "preview.test" for call in env["mock"].calls)
 
 
+async def test_full_resolution_rejects_a_cached_preview(env):
+    c = env["client"]
+    assert (await c.get("/api/listen", params={"ref": "dz:100"})).json()["kind"] == "preview"
+    response = await c.get("/api/listen", params={"ref": "dz:100", "full": "true"})
+    assert response.status_code == 503, response.text
+    assert "Полная версия" in response.json()["detail"]
+    assert not any(call.request.url.host == "preview.test" for call in env["mock"].calls)
+
+
+async def test_full_resolution_keeps_policy_in_stream_url(env):
+    env["hm"].cands = [cand("full", "https://cdn.test/good.mp3")]
+    response = await env["client"].get("/api/listen", params={"ref": "dz:100", "full": "true"})
+    assert response.status_code == 200, response.text
+    assert response.json()["kind"] == "full"
+    assert "&full=true" in response.json()["stream_url"]
+    stream = await env["client"].get(response.json()["stream_url"])
+    assert stream.status_code == 200
+    assert stream.headers["X-HomeMusic-Listen-Kind"] == "full"
+
+
 async def test_full_song_replaces_a_cached_preview_with_the_download_fallback(env):
     from app.services import svc
 
@@ -596,10 +616,11 @@ async def test_nothing_to_play(env):
 
 async def test_owned_track_plays_the_library_file(env, monkeypatch):
     from unittest.mock import AsyncMock
-    from app.services import svc
+
     from app.db import session_scope
     from app.matching.normalize import fingerprint
     from app.models import Track
+    from app.services import svc
 
     rel = "Кино/1988 - Группа крови/1-01 - Группа крови.mp3"
     f = env["music"] / "library" / rel

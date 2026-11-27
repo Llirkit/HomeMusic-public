@@ -72,6 +72,14 @@ public final class PlaybackService extends MediaSessionService {
         currentStream = item != null && item.localConfiguration != null ? item.localConfiguration.uri.toString() : "";
         if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) cycle++;
       }
+      @Override public void onPlayerError(PlaybackException error) {
+        MediaItem item = player.getCurrentMediaItem();
+        if (item != null && item.localConfiguration != null
+            && "true".equals(item.localConfiguration.uri.getQueryParameter("full")) && player.hasNextMediaItem()) {
+          player.seekToNextMediaItem();
+          player.prepare();
+        }
+      }
       @Override public void onAudioSessionIdChanged(int id) {
         if (isRadio()) { radioEqualizer.attach(id); applyRadioVolume(); }
       }
@@ -134,7 +142,7 @@ public final class PlaybackService extends MediaSessionService {
         if (cover.startsWith("/")) cover = base + cover;
         if (Identity.sameOrigin(base, cover)) metadata.setArtworkUri(Uri.parse(cover));
         items.add(new MediaItem.Builder().setMediaId("online:" + i + ":" + ref)
-            .setUri(base + "/api/listen/stream?ref=" + Api.encode(ref)).setMediaMetadata(metadata.build()).build());
+            .setUri(base + "/api/listen/stream?ref=" + Api.encode(ref) + (message.optString("context").startsWith("wave:") ? "&full=true" : "")).setMediaMetadata(metadata.build()).build());
       }
       boolean load = op.equals("load");
       radioToken = ""; radioUrl = ""; radioGeneration++;

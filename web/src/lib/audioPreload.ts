@@ -2,7 +2,7 @@ import { listenStreamUrl } from '../api/client';
 
 // One upcoming file, in memory only. Large/lossless files and failed requests keep using normal streaming.
 const MAX_BYTES = 32 * 1024 * 1024;
-let upcoming: { ref: string; ctl: AbortController; url?: string } | null = null;
+let upcoming: { ref: string; full: boolean; ctl: AbortController; url?: string } | null = null;
 
 export function clearAudioPreload() {
   const previous = upcoming;
@@ -11,16 +11,16 @@ export function clearAudioPreload() {
   if (previous?.url) URL.revokeObjectURL(previous.url);
 }
 
-export function preloadAudio(ref: string | null) {
-  if (upcoming?.ref === ref) return;
+export function preloadAudio(ref: string | null, full = false) {
+  if (upcoming?.ref === ref && upcoming.full === full) return;
   clearAudioPreload();
   if (!ref) return;
-  const entry = { ref, ctl: new AbortController(), url: undefined as string | undefined };
+  const entry = { ref, full, ctl: new AbortController(), url: undefined as string | undefined };
   upcoming = entry;
   void (async () => {
     const timeout = window.setTimeout(() => entry.ctl.abort(), 120_000);
     try {
-      const response = await fetch(listenStreamUrl(ref), {
+      const response = await fetch(listenStreamUrl(ref, full), {
         signal: entry.ctl.signal, credentials: 'same-origin', priority: 'low',
         headers: { 'X-HomeMusic-Prefetch': '1' },
       });
@@ -56,8 +56,8 @@ export function preloadAudio(ref: string | null) {
 }
 
 /** Transfers ownership of a complete file to the player; unfinished downloads fall back to streaming. */
-export function takePreloadedAudio(ref: string): string | null {
-  const url = upcoming?.ref === ref ? upcoming.url ?? null : null;
+export function takePreloadedAudio(ref: string, full = false): string | null {
+  const url = upcoming?.ref === ref && upcoming.full === full ? upcoming.url ?? null : null;
   if (url && upcoming) upcoming.url = undefined;
   clearAudioPreload();
   return url;
