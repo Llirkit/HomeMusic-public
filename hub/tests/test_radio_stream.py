@@ -230,3 +230,38 @@ async def test_transient_source_failure_keeps_stream_open_then_decodes_a_growing
         await stream.aclose()
         await radio_stream.reset()
     assert "body" in closed and "media" in closed and not radio_stream._tasks
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="requires ffmpeg")
+async def test_single_song_repeats_without_source_failure_backoff(env, playlist, tones, monkeypatch):
+    from app.db import session_scope
+    from app.models import Publication, utcnow
+
+    opens = []
+
+    async def source(*args, **kwargs):
+        opens.append(time.monotonic())
+        return SimpleNamespace(status=200, path=tones[0], body=None, close=None)
+
+    monkeypatch.setattr(listen, "open_media", source)
+    p = await publish(env["client"], "radio")
+    async with session_scope() as s:
+        row = await s.get(Publication, p["id"])
+        row.tracks_json = [{**row.tracks_json[0], "duration_s": 2}]
+        row.started_at = utcnow() - timedelta(seconds=1)
+    state = await radio_stream.snapshot(p["id"])
+    stream = radio_stream.subscribe(p["id"], state)
+    start, data = time.monotonic(), []
+    try:
+        async with asyncio.timeout(8):
+            async for chunk in stream:
+                data.append((time.monotonic(), chunk))
+                if time.monotonic() - start > 5:
+                    break
+        assert len(opens) >= 3
+        assert max(b - a for a, b in pairwise(opens)) < 3
+        rms, frequency = await signal(b"".join(chunk for received, chunk in data if received >= time.monotonic() - 0.8))
+        assert rms > 0.03 and frequency == pytest.approx(220, abs=12)
+    finally:
+        await stream.aclose()
+        await radio_stream.reset()

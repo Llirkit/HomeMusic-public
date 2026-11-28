@@ -16,6 +16,7 @@ from fastapi import HTTPException
 
 from app import listen
 from app.db import session_scope
+from app.models import utcnow
 
 log = logging.getLogger(__name__)
 RATE = 44100
@@ -51,7 +52,10 @@ async def snapshot(token: str) -> Snapshot:
         index, position = await advance_radio(publication, session)
         track = publication.tracks_json[index]
         ref = f"nd:{track['nd_song_id']}" if track.get("nd_song_id") else track["ref"]
-        return Snapshot(ref, (ref, index, publication.revision), position,
+        elapsed = max(0, ((publication.paused_at or utcnow()) - publication.started_at).total_seconds())
+        total = sum(max(1, t.get("duration_s") or 180) for t in publication.tracks_json)
+        cycle = int(elapsed // total)
+        return Snapshot(ref, (ref, index, publication.revision, cycle), position,
                         float(track["duration_s"]), publication.paused_at is not None, time.monotonic())
 
 
