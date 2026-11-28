@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
     await asyncio.to_thread(db.run_migrations)
     db.init_engine()
 
-    from app import listen, lyrics
+    from app import listen, lyrics, radio_stream
     from app.api.publications import radio_loop
     from app.housekeeping import scheduler_loop
     from app.jobs.downloads import playlist_adds_loop
@@ -69,6 +69,7 @@ async def lifespan(app: FastAPI):
         for t in tasks:
             t.cancel()
         await pool.stop()
+        await radio_stream.reset()
         await listen.reset()
         await lyrics.reset()
         await wave.reset()

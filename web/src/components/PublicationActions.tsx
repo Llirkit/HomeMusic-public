@@ -14,6 +14,7 @@ export interface Publication {
   active: boolean;
   owner: boolean;
   url: string;
+  live_url?: string;
 }
 
 /** Use the queue's original mix/session, including a former daily mix still playing. */
@@ -32,7 +33,17 @@ export function PublicationLink({ publication: p }: { publication: Publication }
       {canShare() && <Button icon="send" onClick={() => void shareText(`${p.title}\n${p.url}`)}>Отправить</Button>}
     </div>
     {p.kind === 'radio' && <Link to={`/radio/${p.id}`} className="flex min-h-12 items-center text-accent underline">Открыть эфир</Link>}
+    {p.kind === 'radio' && p.live_url && <RadioStreamLink url={p.live_url} />}
   </div>;
+}
+
+export function RadioStreamLink({ url }: { url: string }) {
+  return <section aria-label="Поток для внешнего плеера" className="space-y-3 rounded-xl border border-line p-4 text-left">
+    <h2 className="font-bold">Для бота или внешнего плеера</h2>
+    <p className="text-sm text-muted">Непрерывный MP3-поток без входа. Вставьте эту ссылку в команду воспроизведения бота или откройте в VLC. Во время общей паузы передаётся тишина; звук может немного отставать от веб-плеера.</p>
+    <label className="block text-sm">Ссылка на MP3-поток<input className="input mt-1 w-full" readOnly value={url} onFocus={(e) => e.target.select()} /></label>
+    <Button icon="link" onClick={() => void copyText(url).then((ok) => toast(ok ? 'Ссылка на поток скопирована' : 'Не удалось скопировать. Выделите ссылку вручную.', ok ? 'success' : 'error'))}>Копировать ссылку на поток</Button>
+  </section>;
 }
 
 export function PublicationActions({ sourceKind, sourceId, disabled, radio = sourceKind === 'playlist' || sourceKind === 'mix', share = true, inline = false }: {

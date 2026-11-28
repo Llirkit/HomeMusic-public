@@ -6,7 +6,7 @@ import type { FavoriteSubject, FavoriteTarget } from '../src/api/types.ts';
 import { insightsMock } from './insights.ts';
 
 type Json = Record<string, unknown>;
-const publications = new Map<string, { id: string; title: string; kind: string; source_kind: string; source_id: string; active: boolean; owner: boolean; url: string; tracks: Json[]; started: number }>();
+const publications = new Map<string, { id: string; title: string; kind: string; source_kind: string; source_id: string; active: boolean; owner: boolean; url: string; live_url?: string; tracks: Json[]; started: number }>();
 
 const now = () => new Date().toISOString();
 let searchHistory: string[] = [];
@@ -975,8 +975,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<boolea
       if (!tracks.length) return send(res, 409, { detail: 'Здесь пока нет треков' }), true;
       const id = `mock-publication-${publications.size + 1}`;
       const value = { id, title: b.source_kind === 'playlist' ? playlists.find((v) => v.id === b.source_id)?.name || 'Плейлист' : 'Подборка', kind: String(b.kind), source_kind: String(b.source_kind), source_id: String(b.source_id), active: true, owner: true, tracks, started: Date.now(), url: `http://${req.headers.host}/#/${b.kind === 'radio' ? 'radio' : 'shared'}/${id}` };
-      publications.set(id, value);
-      return send(res, 200, value), true;
+      publications.set(id, { ...value, ...(value.kind === 'radio' ? { live_url: `http://${req.headers.host}/api/publications/${id}/live.mp3` } : {}) });
+      return send(res, 200, publications.get(id)), true;
     }
     if (!publication?.active) return send(res, 404, { detail: 'Ссылка недоступна или отозвана' }), true;
     if (m === 'DELETE') { publication.active = false; return send(res, 200, { ok: true }), true; }

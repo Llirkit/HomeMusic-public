@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, request } from '../api/client';
 import type { CatalogTrack, TrackOut } from '../api/types';
-import { PublicationLink, type Publication } from '../components/PublicationActions';
+import { PublicationLink, RadioStreamLink, type Publication } from '../components/PublicationActions';
 import { RadioManager } from '../components/RadioManager';
 import { RadioSoundControls, useRadioSound } from '../components/RadioSound';
 import { TrackRow, playAll } from '../components/catalog';
@@ -217,6 +217,7 @@ export function RadioPage({ token }: { token: string }) {
       <p className="text-sm text-muted">При подключении вы услышите текущее место эфира.</p>
     </section>}
     <div className="mt-6"><RadioSoundControls sound={sound} /></div>
+    {data?.live_url && <div className="mt-6"><RadioStreamLink url={data.live_url} /></div>}
     {data?.can_manage && <div className="mt-6"><RadioManager token={token} revision={data.revision} index={data.index} paused={!!data.paused} position={position} duration={data.duration_s} onChanged={() => reloadBroadcast.current()} /></div>}
     {error && <ErrorState text={error} onRetry={() => { current.current = ''; setRetry((v) => v + 1); }} />}
     <Link to="/home" className="mt-6 flex min-h-12 items-center justify-center text-accent underline">Открыть HomeMusic</Link>

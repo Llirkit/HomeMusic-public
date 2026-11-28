@@ -5,7 +5,7 @@ const token = 'abcdefghijklmnopqrstuvwx12345678';
 
 async function backend(page, signedIn = true) {
   const state = { signedIn, requests: [], links: [], current: song(1), position: 42, revoked: false, canManage: false, paused: false, revision: 0, controls: [], tracks: [song(1), song(2)] };
-  const publication = { id: token, title: 'Дорога', kind: 'share', owner: true, active: true, source_kind: 'playlist', url: `http://127.0.0.1:5174/#/shared/${token}` };
+  const publication = { id: token, title: 'Дорога', kind: 'share', owner: true, active: true, source_kind: 'playlist', url: `http://127.0.0.1:5174/#/shared/${token}`, live_url: `http://127.0.0.1:5174/api/publications/${token}/live.mp3` };
   await page.route('**/api/**', async (route) => {
     const req = route.request(), path = new URL(req.url()).pathname;
     if (!path.startsWith('/api/')) return route.fallback();
@@ -45,6 +45,7 @@ async function backend(page, signedIn = true) {
     if (path === '/api/playlists') return json([{ id: 'p1', name: 'Дорога', song_count: 2, duration_s: 360 }, { id: 'empty', name: 'Пустой', song_count: 0, duration_s: 0 }]);
     if (path === '/api/mixes/1') return json({ id: 1, title: 'Микс дня', description: 'Любимые песни', mode: 'normal', mode_title: 'Обычный', created_at: '2026-11-25T00:00:00', ready: 2, total: 2, tracks: [song(1), song(2)], generators: {} });
     if (path === '/api/mixes/today') return json({ mix: null, building: false, onboarding: false, settings: { mode: 'normal', mix_hour: 5, artists: [] } });
+    if (path === '/api/listen') return json({ ...song(1), kind: 'library', stream_url: '/api/fake-audio', ref: new URL(req.url()).searchParams.get('ref') });
     if (path === '/api/starred') return json({ song_ids: [], album_ids: [], artist_ids: [], refs: [], subjects: [] });
     if (path === '/api/disliked') return json({ refs: [], artists: [], subjects: [] });
     if (path === '/api/nd/home') return json({ recent: [], frequent: [], newest: [], starred: [], radio: [] });
@@ -192,6 +193,17 @@ test('Windows radio toolbar toggles the broadcast without next and previous comm
 
 test('full player for a daily mix creates radio from the playing mix', async ({ page }) => {
   await fakeMedia(page);
+  await page.addInitScript(() => {
+    localStorage.setItem('hm-wave-audio', '0');
+    window.Audio = class extends EventTarget {
+      currentTime = 0; duration = 180; readyState = 4; paused = true; ended = false; src = '';
+      play() { this.paused = false; this.dispatchEvent(new Event('playing')); return Promise.resolve(); }
+      pause() { this.paused = true; this.dispatchEvent(new Event('pause')); }
+      load() {}
+      getAttribute(name) { return name === 'src' ? this.src : null; }
+      removeAttribute() { this.src = ''; }
+    };
+  });
   const state = await backend(page);
   await page.goto('/#/mix/1');
   await page.getByRole('button', { name: 'Слушать всё', exact: true }).click();
@@ -301,4 +313,20 @@ test('native radio receives personal sound settings and preserves connection dur
   await expect(page.getByText('Эфир на паузе', { exact: true })).toBeVisible({ timeout: 10000 });
   expect(await page.evaluate(() => window.radioCommands.some(c => c.op === 'pause'))).toBe(false);
   await expect(page.getByRole('button', { name: 'Отключиться от эфира', exact: true })).toBeVisible();
+});
+
+test('guest copies a persistent MP3 URL from radio without starting or changing playback', async ({ page }) => {
+  const state = await backend(page, false);
+  await page.goto(`/#/radio/${token}`);
+  const external = page.getByRole('region', { name: 'Поток для внешнего плеера', exact: true });
+  const url = external.getByRole('textbox', { name: 'Ссылка на MP3-поток', exact: true });
+  await expect(url).toHaveValue(`http://127.0.0.1:5174/api/publications/${token}/live.mp3`);
+  await expect(url).toHaveAttribute('readonly');
+  await external.getByRole('button', { name: 'Копировать ссылку на поток', exact: true }).click();
+  await expect(page.getByText('Ссылка на поток скопирована', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Слушать эфир', exact: true })).toBeVisible();
+  expect(state.controls).toEqual([]);
+  await page.reload();
+  await expect(url).toHaveValue(`http://127.0.0.1:5174/api/publications/${token}/live.mp3`);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

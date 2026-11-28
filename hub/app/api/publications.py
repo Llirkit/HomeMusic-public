@@ -11,9 +11,11 @@ from urllib.parse import quote
 from weakref import WeakValueDictionary
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
 
 from app.api.medialib import nd_call, songs_out
 from app.api.mixes import mix_out
@@ -80,7 +82,8 @@ def output(p: Publication, request: Request, user_id: int | None = None):
     origin = get_settings().public_hub_url or str(request.base_url).rstrip("/")
     return {"id": p.id, "title": p.title, "kind": p.kind, "source_kind": p.source_kind,
             "active": p.active, "owner": p.user_id == user_id,
-            "url": f"{origin.rstrip('/')}/#/{'radio' if p.kind == 'radio' else 'shared'}/{p.id}"}
+            "url": f"{origin.rstrip('/')}/#/{'radio' if p.kind == 'radio' else 'shared'}/{p.id}",
+            **({"live_url": f"{origin.rstrip('/')}/api/publications/{p.id}/live.mp3"} if p.kind == "radio" else {})}
 
 
 async def source(body: CreateIn, user: User, s: AsyncSession):
@@ -402,6 +405,21 @@ async def control(token: str, body: ControlIn, user: User = Depends(current_user
         p.revision += 1
         await s.commit()
         return queue_out(p)
+
+
+@router.api_route("/{token}/live.mp3", methods=["GET", "HEAD"])
+async def live(token: str, request: Request):
+    from app import radio_stream
+
+    state = await radio_stream.snapshot(token)
+    headers = {"Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no", "Accept-Ranges": "none"}
+    if request.method == "HEAD":
+        response = Response(media_type="audio/mpeg", headers=headers)
+        del response.headers["Content-Length"]
+        return response
+    subscription = radio_stream.subscribe(token, state)
+    return StreamingResponse(subscription, media_type="audio/mpeg", headers=headers,
+                             background=BackgroundTask(subscription.aclose))
 
 
 @router.get("/{token}/audio/{index}")
